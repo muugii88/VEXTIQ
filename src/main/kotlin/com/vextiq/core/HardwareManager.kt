@@ -347,7 +347,9 @@ object HardwareManager {
                                 exit
                             }
                         }
-                    } catch {}
+                    } catch {
+                        # Registry key not found or access denied
+                    }
                 }
                 0
                 """.trimIndent()

@@ -83,7 +83,9 @@ class GamePaths {
                 props.forEach { key, value ->
                     gamePaths[key.toString()] = value.toString()
                 }
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                println("Error loading game paths: ${e.message}")
+            }
         }
     }
     
@@ -94,7 +96,9 @@ class GamePaths {
                 props.setProperty(key, value)
             }
             pathsFile.outputStream().use { props.store(it, "VEXTIQ Game Paths") }
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            println("Error saving game paths: ${e.message}")
+        }
     }
     
     fun getPath(gameId: String): String? = gamePaths[gameId]
@@ -196,7 +200,9 @@ class GamePaths {
                             val libPath = match.groupValues[1].replace("\\\\", "\\")
                             steamPaths.add("$libPath\\steamapps\\common")
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        println("Error parsing Steam VDF: ${e.message}")
+                    }
                 }
             }
         }
@@ -248,7 +254,9 @@ class GamePaths {
                             onLog("[OK] $displayName")
                         }
                     }
-                } catch (e: Exception) {}
+                } catch (e: Exception) {
+                    println("Error parsing Epic manifest ${manifest.name}: ${e.message}")
+                }
             }
         }
         
@@ -330,7 +338,9 @@ class GamePaths {
                     }
                 }
             }
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            println("Error scanning EA registry: ${e.message}")
+        }
 
         
         // Method 2: EA Desktop config
@@ -354,11 +364,15 @@ class GamePaths {
                                     }
                                 }
                             }
-                        } catch (e: Exception) {}
+                        } catch (e: Exception) {
+                            println("Error parsing EA config file ${file.name}: ${e.message}")
+                        }
                     }
                 }
             }
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            println("Error scanning EA config: ${e.message}")
+        }
         
         // Method 3: Folder scan (all drives)
         for (drive in drives) {

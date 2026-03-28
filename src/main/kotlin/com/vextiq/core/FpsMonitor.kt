@@ -180,7 +180,9 @@ class FpsMonitor {
                                     frametimes.clear()
                                     lastSecond = now
                                 }
-                            } catch (e: Exception) {}
+                            } catch (e: Exception) {
+                                println("Error parsing PresentMon output: ${e.message}")
+                            }
                         }
                     }
                 }

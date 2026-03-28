@@ -143,7 +143,6 @@ class ProcessManager {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
             process.waitFor()
             
             // Parse JSON manually (simple)

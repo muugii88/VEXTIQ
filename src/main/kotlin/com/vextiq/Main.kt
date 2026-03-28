@@ -35,7 +35,6 @@ fun App(
     val optimizer = remember { Optimizer() }
     
     val stats by monitor.stats.collectAsState()
-    val hwInfo by monitor.hardwareInfo.collectAsState()
     
     var currentPage by remember { mutableStateOf(Page.DASHBOARD) }
     var selectedGame by remember { mutableStateOf(Games.list.first()) }
@@ -230,7 +229,7 @@ fun App(
                         stats = stats,
                         cpuHistory = cpuHistory,
                         gpuHistory = gpuHistory,
-                        ramHistory = ramHistory,
+                        _ramHistory = ramHistory,
                         latencyHistory = latencyHistory,
                         selectedGame = selectedGame,
                         selectedPlaystyle = dashboardPlaystyle,
@@ -293,15 +292,6 @@ fun App(
                         onSelectGame = { game ->
                             selectedGame = game
                             boostLogs = listOf("[i] Selected: ${game.name}" to "")
-                        },
-                        onSetGamePath = { gameId, path ->
-                            val gamePaths = com.vextiq.core.GamePaths()
-                            if (java.io.File(path).exists()) {
-                                gamePaths.setPath(gameId, path)
-                                boostLogs = boostLogs + ("[OK] Path saved: $path" to "ok")
-                            } else {
-                                boostLogs = boostLogs + ("[!] Path not found: $path" to "warn")
-                            }
                         },
                         onOptimize = { playstyle ->
                             scope.launch {
@@ -381,7 +371,7 @@ fun App(
                                         logFn("[>>] Opening Star Citizen AppData...")
                                         val scPath = "${System.getenv("LOCALAPPDATA")}\\Star Citizen"
                                         try {
-                                            Runtime.getRuntime().exec("explorer \"$scPath\"")
+                                            ProcessBuilder("explorer", scPath).start()
                                             logFn("[OK] Opened: $scPath")
                                         } catch (e: Exception) {
                                             logFn("[!] Failed to open: ${e.message}")
@@ -391,7 +381,7 @@ fun App(
                                         val brain = com.vextiq.optimizer.VextiqBrain()
                                         val result = brain.optimize("star_citizen", "performance", "none", 60, logFn)
                                         logFn("")
-                                        logFn("[OK] USER.cfg generated!")
+                                        logFn("[OK] USER.cfg generated! Score: ${result.score}")
                                         logFn("[i] Copy the config from above to your USER folder")
                                     }
                                     "MMCSS" -> {
@@ -459,7 +449,7 @@ fun DashboardPage(
     stats: SystemStats,
     cpuHistory: List<Int>,
     gpuHistory: List<Int>,
-    ramHistory: List<Int>,
+    _ramHistory: List<Int>,
     latencyHistory: List<Int>,
     selectedGame: Game,
     selectedPlaystyle: String,
@@ -600,7 +590,6 @@ fun GameBoostPage(
     selectedGame: Game,
     logs: List<Pair<String, String>>,
     onSelectGame: (Game) -> Unit,
-    onSetGamePath: (String, String) -> Unit,
     onOptimize: (String) -> Unit,
     onScanGames: () -> Unit
 ) {
@@ -1587,7 +1576,7 @@ fun VpnPage() {
                 
                 Spacer(Modifier.height(10.dp))
                 
-                regions.forEach { (name, ip, flag) ->
+                regions.forEach { (name, _, flag) ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

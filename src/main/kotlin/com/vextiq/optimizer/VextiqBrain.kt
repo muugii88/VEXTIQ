@@ -188,13 +188,13 @@ class VextiqBrain {
         }
         
         val key = keys[depth]
-        val (minV, maxV, step) = searchSpace[key]!!
+        val (minV, maxV, step) = searchSpace.getValue(key)
         for (v in minV..maxV step step) {
             current[key] = v
             // Pruning
             val temp = current.toMutableMap()
             for (k in keys.drop(depth + 1)) {
-                val (kMin, _, _) = searchSpace[k]!!
+                val (kMin, _, _) = searchSpace.getValue(k)
                 temp[k] = if (k == "r_TextureMipBias") 0 else kMin
             }
             if (estimateFps(temp) >= targetFps * 0.2) {

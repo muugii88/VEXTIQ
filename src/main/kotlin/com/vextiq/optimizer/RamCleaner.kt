@@ -30,7 +30,9 @@ class RamCleaner {
                 Get-Process | Where-Object { ${'$'}_.WorkingSet64 -gt 100MB } | ForEach-Object {
                     try {
                         ${'$'}_.MinWorkingSet = 1MB
-                    } catch {}
+                    } catch {
+                        # Some processes can't be modified
+                    }
                 }
             """.trimIndent())
             
@@ -75,7 +77,9 @@ class RamCleaner {
                 Get-Process | Where-Object { ${'$'}_.Id -ne ${'$'}PID } | ForEach-Object {
                     try {
                         ${'$'}type::EmptyWorkingSet(${'$'}_.Handle) | Out-Null
-                    } catch {}
+                    } catch {
+                        # Some processes can't be emptied
+                    }
                 }
             """.trimIndent())
             

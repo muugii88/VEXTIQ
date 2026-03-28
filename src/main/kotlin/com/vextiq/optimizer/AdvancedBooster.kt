@@ -65,7 +65,6 @@ class AdvancedBooster {
                 "powercfg /setactive scheme_current"
             )
             
-            var success = true
             for (cmd in commands) {
                 val process = ProcessBuilder(listOf("cmd", "/c", cmd))
                     .redirectErrorStream(true).start()
@@ -106,7 +105,6 @@ class AdvancedBooster {
                 "powershell", "-NoProfile", "-Command", script
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
             process.waitFor()
             
             onLog("[OK] GPU scheduler optimized")
@@ -574,7 +572,9 @@ class AdvancedBooster {
                     try {
                         dir.listFiles()?.forEach { it.deleteRecursively() }
                         cleanedCount++
-                    } catch (_: Exception) { }
+                    } catch (_: Exception) {
+                        // Some files might be in use
+                    }
                 }
             }
             
@@ -600,7 +600,9 @@ class AdvancedBooster {
                         Stop-Service -Name ${'$'}s -Force -ErrorAction SilentlyContinue
                         Set-Service -Name ${'$'}s -StartupType Disabled -ErrorAction SilentlyContinue
                         Write-Output "Disabled: ${'$'}s"
-                    } catch {}
+                    } catch {
+                        # Service might not exist or access denied
+                    }
                 }
                 Write-Output "OK"
             """.trimIndent()
@@ -640,7 +642,9 @@ class AdvancedBooster {
                 foreach (${'$'}key in ${'$'}usbKeys) {
                     try {
                         Set-ItemProperty -Path ${'$'}key.PSPath -Name "EnhancedPowerManagementEnabled" -Value 0 -ErrorAction SilentlyContinue
-                    } catch {}
+                    } catch {
+                        # Registry access might fail
+                    }
                 }
                 
                 # 3. PCI Latency & PCIe Link Max Performance
@@ -689,7 +693,9 @@ class AdvancedBooster {
                         try {
                             ${'$'}p.ProcessorAffinity = 0xFFFF
                             Write-Output "Pinned: ${'$'}(${'$'}p.ProcessName)"
-                        } catch {}
+                        } catch {
+                            # Process might not allow affinity change
+                        }
                     }
                 }
                 Write-Output "OK"

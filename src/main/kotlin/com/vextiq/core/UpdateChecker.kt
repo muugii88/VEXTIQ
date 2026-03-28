@@ -96,7 +96,7 @@ class UpdateChecker {
     fun openDownloadPage() {
         try {
             val url = "https://github.com/vextiq/vextiq-pro/releases/latest"
-            Runtime.getRuntime().exec("rundll32 url.dll,FileProtocolHandler $url")
+            ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start()
         } catch (e: Exception) {
             // Ignore
         }

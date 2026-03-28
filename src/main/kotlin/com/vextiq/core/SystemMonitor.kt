@@ -219,7 +219,9 @@ class SystemMonitor {
                         bestLatency = latency
                         if (bestLatency < 100) break // Good enough
                     }
-                } catch (e: Exception) { }
+                } catch (e: Exception) {
+                    println("Error pinging $server: ${e.message}")
+                }
             }
             
             if (bestLatency < 999) bestLatency else 0

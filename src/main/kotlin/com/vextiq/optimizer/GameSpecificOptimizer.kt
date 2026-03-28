@@ -244,7 +244,7 @@ class GameSpecificOptimizer {
      */
     private fun optimizeWarzone(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing Call of Duty Warzone...")
-        val result = vextiqBrain.optimize("warzone", "performance", playstyle) { msg -> onLog(msg) }
+        vextiqBrain.optimize("warzone", "performance", playstyle) { msg -> onLog(msg) }
         
         onLog("[OK] Applied Brain optimization for ${playstyle.uppercase()}")
         onLog("[i] Recommended In-Game Settings:")
@@ -288,7 +288,7 @@ class GameSpecificOptimizer {
      */
     private fun optimizeGTAV(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing GTA V...")
-        val result = vextiqBrain.optimize("gta_v", "performance", playstyle) { msg -> onLog(msg) }
+        vextiqBrain.optimize("gta_v", "performance", playstyle) { msg -> onLog(msg) }
         onLog("[OK] Applied ${playstyle.uppercase()} settings")
     }
     
@@ -297,7 +297,7 @@ class GameSpecificOptimizer {
      */
     private fun optimizeRust(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing Rust...")
-        val result = vextiqBrain.optimize("rust", "performance", playstyle) { msg -> onLog(msg) }
+        vextiqBrain.optimize("rust", "performance", playstyle) { msg -> onLog(msg) }
         setSteamLaunchOptions("252490", "-high -malloc=system", onLog)
     }
     
@@ -306,7 +306,7 @@ class GameSpecificOptimizer {
      */
     private fun optimizeTarkov(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing Escape from Tarkov...")
-        val result = vextiqBrain.optimize("tarkov", "performance", playstyle) { msg -> onLog(msg) }
+        vextiqBrain.optimize("tarkov", "performance", playstyle) { msg -> onLog(msg) }
         
         onLog("[OK] Tarkov optimization applied: ${playstyle.uppercase()}")
         if (playstyle == "visibility") {
@@ -466,7 +466,7 @@ class GameSpecificOptimizer {
     private fun optimizeGhostRecon(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing Ghost Recon Breakpoint...")
         
-        val grbPath = gamePaths.getPath("ghost_recon_breakpoint")
+        // val grbPath = gamePaths.getPath("ghost_recon_breakpoint")
         
         // Settings based on playstyle
         val settings = when (playstyle) {
@@ -527,7 +527,7 @@ class GameSpecificOptimizer {
     private fun optimizeOnceHuman(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing Once Human...")
         
-        val ohPath = gamePaths.getPath("once_human")
+        // val ohPath = gamePaths.getPath("once_human")
         
         val settings = when (playstyle) {
             "quality" -> """
@@ -590,7 +590,7 @@ class GameSpecificOptimizer {
     private fun optimizeDivision2(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing The Division 2...")
         
-        val div2Path = gamePaths.getPath("division_2")
+        // val div2Path = gamePaths.getPath("division_2")
         
         val settings = when (playstyle) {
             "raid" -> """
