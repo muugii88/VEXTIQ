@@ -133,11 +133,16 @@ class FpsMonitor {
                 presentMonProcess!!.inputStream.bufferedReader().use { reader ->
                     _frameStats.value = _frameStats.value.copy(isMonitoring = true)
                     
-                    var frameCount = 0
-                    var totalFrametime = 0.0
-                    var lastSecond = System.currentTimeMillis()
-                    val frametimes = mutableListOf<Double>()
-                    var currentProcess = ""
+                    val ignoreList = listOf(
+                        "Discord", "Spotify", "Chrome", "msedge", "Firefox", "Steam", "EpicGamesLauncher",
+                        "GalaxyClient", "Battle.net", "Origin", "EADesktop", "Taskmgr", "VEXTIQ", "explorer",
+                        "SearchHost", "StartMenuExperienceHost", "ApplicationFrameHost", "TextInputHost",
+                        "ShellExperienceHost", "NVIDIA Share", "RadeonSoftware", "RTSS", "Afterburner",
+                        "Overwolf", "Twitch", "Teams", "Slack", "Zoom", "WhatsApp"
+                    )
+                    
+                    val processFrameCounts = mutableMapOf<String, Int>()
+                    val processTotalTime = mutableMapOf<String, Double>()
                     
                     while (isActive && presentMonProcess?.isAlive == true) {
                         val line = reader.readLine() ?: break
@@ -145,39 +150,42 @@ class FpsMonitor {
                         
                         if (parts.size >= 6) {
                             try {
-                                val processName = parts[0]
+                                val processName = parts[0].replace(".exe", "", ignoreCase = true)
                                 if (processName.contains("PresentMon", true) || processName == "Idle") continue
                                 
                                 val frametime = parts[5].toDoubleOrNull() ?: continue
                                 
-                                currentProcess = processName
-                                frameCount++
-                                totalFrametime += frametime
-                                frametimes.add(frametime)
+                                // Track frames for this process
+                                processFrameCounts[processName] = (processFrameCounts[processName] ?: 0) + 1
+                                processTotalTime[processName] = (processTotalTime[processName] ?: 0.0) + frametime
                                 
                                 val now = System.currentTimeMillis()
-                                if (now - lastSecond >= 500) {
-                                    val avgFrametime = if (frameCount > 0) totalFrametime / frameCount else 0.0
-                                    val fps = if (avgFrametime > 0) (1000.0 / avgFrametime).toInt() else 0
+                                if (now - lastSecond >= 800) { // Slightly longer window for better sampling
+                                    // Pick the best candidate
+                                    // 1. Not in ignore list
+                                    // 2. Highest frame count
+                                    val candidate = processFrameCounts.entries
+                                        .filter { entry -> ignoreList.none { ignore -> entry.key.contains(ignore, true) } }
+                                        .maxByOrNull { it.value }
                                     
-                                    val sortedFrametimes = frametimes.sorted()
-                                    val fps1Percent = if (sortedFrametimes.isNotEmpty()) {
-                                        val idx = (sortedFrametimes.size * 0.99).toInt().coerceIn(0, sortedFrametimes.lastIndex)
-                                        val ft = sortedFrametimes[idx]
-                                        if (ft > 0) (1000.0 / ft).toInt() else 0
-                                    } else 0
+                                    val bestProcess = candidate?.key ?: processFrameCounts.maxByOrNull { it.value }?.key ?: ""
                                     
-                                    _frameStats.value = FrameStats(
-                                        fps = fps,
-                                        frametime = avgFrametime,
-                                        fps1Percent = fps1Percent,
-                                        processName = currentProcess,
-                                        isMonitoring = true
-                                    )
+                                    if (bestProcess.isNotEmpty()) {
+                                        val count = processFrameCounts[bestProcess] ?: 0
+                                        val totalTime = processTotalTime[bestProcess] ?: 0.0
+                                        val avgFrametime = if (count > 0) totalTime / count else 0.0
+                                        val fps = if (avgFrametime > 0) (1000.0 / avgFrametime).toInt() else 0
+                                        
+                                        _frameStats.value = FrameStats(
+                                            fps = fps,
+                                            frametime = avgFrametime,
+                                            processName = bestProcess,
+                                            isMonitoring = true
+                                        )
+                                    }
                                     
-                                    frameCount = 0
-                                    totalFrametime = 0.0
-                                    frametimes.clear()
+                                    processFrameCounts.clear()
+                                    processTotalTime.clear()
                                     lastSecond = now
                                 }
                             } catch (e: Exception) {
@@ -296,10 +304,11 @@ class FpsMonitor {
      */
     private fun getGpuFpsEstimate(): Pair<Int, String> {
         return try {
-            // Get foreground process name
+            // Get foreground process name - smarter detection
+            val ignoreRegex = "Discord|Spotify|Chrome|msedge|Firefox|Steam|EpicGamesLauncher|Taskmgr|VEXTIQ|explorer|SearchHost|StartMenuExperienceHost|ApplicationFrameHost|TextInputHost|ShellExperienceHost|NVIDIA Share|RadeonSoftware|RTSS|Afterburner|Overwolf|Twitch|Teams|Slack|Zoom|WhatsApp"
             val nameProcess = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command",
-                "(Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName"
+                "\$p = Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 -and \$_.ProcessName -notmatch '$ignoreRegex' } | Sort-Object CPU -Descending | Select-Object -First 1; if (\$p) { \$p.ProcessName } else { (Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName }"
             )).redirectErrorStream(true).start()
             val processName = nameProcess.inputStream.bufferedReader().readText().trim().ifEmpty { "Unknown" }
             nameProcess.waitFor()
