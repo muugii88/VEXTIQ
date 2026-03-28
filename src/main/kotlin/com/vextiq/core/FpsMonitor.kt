@@ -143,6 +143,7 @@ class FpsMonitor {
                     
                     val processFrameCounts = mutableMapOf<String, Int>()
                     val processTotalTime = mutableMapOf<String, Double>()
+                    var lastSecond = System.currentTimeMillis()
                     
                     while (isActive && presentMonProcess?.isAlive == true) {
                         val line = reader.readLine() ?: break
