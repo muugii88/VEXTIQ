@@ -166,8 +166,10 @@ class SystemMonitor {
             val process = ProcessBuilder(listOf(
                 "nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"
             )).redirectErrorStream(true).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
-            if (process.waitFor() == 0) output.toIntOrNull() ?: 0 else 0
+            val output = process.inputStream.bufferedReader().use { it.readText().trim() }
+            val exitCode = process.waitFor()
+            process.destroy()
+            if (exitCode == 0) output.toIntOrNull() ?: 0 else 0
         } catch (e: Exception) { 0 }
     }
     
@@ -177,9 +179,10 @@ class SystemMonitor {
                 "powershell", "-NoProfile", "-NonInteractive", "-Command",
                 "try { \$sum = (Get-Counter '\\GPU Engine(*engtype_3D)\\Utilization Percentage' -ErrorAction Stop).CounterSamples | Measure-Object -Property CookedValue -Sum | Select-Object -ExpandProperty Sum; [math]::Min(100, [math]::Round(\$sum)) } catch { 0 }"
             )).redirectErrorStream(true).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
-            process.waitFor()
-            output.toIntOrNull()?.coerceIn(0, 100) ?: 0
+            val output = process.inputStream.bufferedReader().use { it.readText().trim() }
+            val exitCode = process.waitFor()
+            process.destroy()
+            if (exitCode == 0) output.toIntOrNull()?.coerceIn(0, 100) ?: 0 else 0
         } catch (e: Exception) { 0 }
     }
     

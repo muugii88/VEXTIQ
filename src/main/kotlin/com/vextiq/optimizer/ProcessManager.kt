@@ -24,9 +24,10 @@ class ProcessManager {
                 "call", "setpriority", "128" // High priority
             )).redirectErrorStream(true).start()
             
-            process.waitFor()
+            val exitCode = process.waitFor()
+            process.destroy()
             
-            if (process.exitValue() == 0) {
+            if (exitCode == 0) {
                 onLog("[OK] $processName priority set to High")
                 true
             } else {
@@ -51,11 +52,17 @@ class ProcessManager {
                 "call", "setpriority", "256" // Realtime
             )).redirectErrorStream(true).start()
             
-            process.waitFor()
+            val exitCode = process.waitFor()
+            process.destroy()
             
-            onLog("[OK] $processName priority set to Realtime")
-            onLog("[!] Warning: Realtime priority may cause system instability")
-            true
+            if (exitCode == 0) {
+                onLog("[OK] $processName priority set to Realtime")
+                onLog("[!] Warning: Realtime priority may cause system instability")
+                true
+            } else {
+                onLog("[!] Could not set priority for $processName")
+                false
+            }
         } catch (e: Exception) {
             onLog("[!] Error: ${e.message}")
             false

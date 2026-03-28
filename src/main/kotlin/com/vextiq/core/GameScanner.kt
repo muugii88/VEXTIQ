@@ -26,7 +26,7 @@ class GameScanner {
         onLog("[>>] Scanning for installed games...")
         
         // Steam
-        val steamGames = scanSteam()
+        val steamGames = scanSteam(onLog)
         games.addAll(steamGames)
         if (steamGames.isNotEmpty()) {
             onLog("[OK] Steam: ${steamGames.size} games found")
@@ -65,7 +65,7 @@ class GameScanner {
     /**
      * Scan Steam library
      */
-    private fun scanSteam(): List<InstalledGame> {
+    private fun scanSteam(onLog: (String) -> Unit): List<InstalledGame> {
         val games = mutableListOf<InstalledGame>()
         
         // Find Steam installation
@@ -90,13 +90,16 @@ class GameScanner {
                         .filter { !it.name.contains("crash", ignoreCase = true) }
                         .toList()
                     
-                    val mainExe = exeFiles.maxByOrNull { it.length() }
+                    val mainExe = exeFiles.maxByOrNull { it.length() } ?: run {
+                        onLog("[!] No executable found in ${gameDir.name}")
+                        return@forEach
+                    }
                     
                     games.add(InstalledGame(
                         name = gameDir.name,
                         path = gameDir.absolutePath,
                         launcher = "Steam",
-                        exeName = mainExe?.name ?: ""
+                        exeName = mainExe.name
                     ))
                 }
             }

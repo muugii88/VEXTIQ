@@ -130,62 +130,66 @@ class FpsMonitor {
                     "-qpc_time"
                 )).redirectErrorStream(true).start()
                 
-                val reader = BufferedReader(InputStreamReader(presentMonProcess!!.inputStream))
-                _frameStats.value = _frameStats.value.copy(isMonitoring = true)
-                
-                var frameCount = 0
-                var totalFrametime = 0.0
-                var lastSecond = System.currentTimeMillis()
-                val frametimes = mutableListOf<Double>()
-                var currentProcess = ""
-                
-                while (isActive && presentMonProcess?.isAlive == true) {
-                    val line = reader.readLine() ?: break
-                    val parts = line.split(",")
+                presentMonProcess!!.inputStream.bufferedReader().use { reader ->
+                    _frameStats.value = _frameStats.value.copy(isMonitoring = true)
                     
-                    if (parts.size >= 6) {
-                        try {
-                            val processName = parts[0]
-                            if (processName.contains("PresentMon", true) || processName == "Idle") continue
-                            
-                            val frametime = parts[5].toDoubleOrNull() ?: continue
-                            
-                            currentProcess = processName
-                            frameCount++
-                            totalFrametime += frametime
-                            frametimes.add(frametime)
-                            
-                            val now = System.currentTimeMillis()
-                            if (now - lastSecond >= 500) {
-                                val avgFrametime = if (frameCount > 0) totalFrametime / frameCount else 0.0
-                                val fps = if (avgFrametime > 0) (1000.0 / avgFrametime).toInt() else 0
+                    var frameCount = 0
+                    var totalFrametime = 0.0
+                    var lastSecond = System.currentTimeMillis()
+                    val frametimes = mutableListOf<Double>()
+                    var currentProcess = ""
+                    
+                    while (isActive && presentMonProcess?.isAlive == true) {
+                        val line = reader.readLine() ?: break
+                        val parts = line.split(",")
+                        
+                        if (parts.size >= 6) {
+                            try {
+                                val processName = parts[0]
+                                if (processName.contains("PresentMon", true) || processName == "Idle") continue
                                 
-                                val sortedFrametimes = frametimes.sorted()
-                                val fps1Percent = if (sortedFrametimes.isNotEmpty()) {
-                                    val idx = (sortedFrametimes.size * 0.99).toInt().coerceIn(0, sortedFrametimes.lastIndex)
-                                    val ft = sortedFrametimes[idx]
-                                    if (ft > 0) (1000.0 / ft).toInt() else 0
-                                } else 0
+                                val frametime = parts[5].toDoubleOrNull() ?: continue
                                 
-                                _frameStats.value = FrameStats(
-                                    fps = fps,
-                                    frametime = avgFrametime,
-                                    fps1Percent = fps1Percent,
-                                    processName = currentProcess,
-                                    isMonitoring = true
-                                )
+                                currentProcess = processName
+                                frameCount++
+                                totalFrametime += frametime
+                                frametimes.add(frametime)
                                 
-                                frameCount = 0
-                                totalFrametime = 0.0
-                                frametimes.clear()
-                                lastSecond = now
-                            }
-                        } catch (e: Exception) {}
+                                val now = System.currentTimeMillis()
+                                if (now - lastSecond >= 500) {
+                                    val avgFrametime = if (frameCount > 0) totalFrametime / frameCount else 0.0
+                                    val fps = if (avgFrametime > 0) (1000.0 / avgFrametime).toInt() else 0
+                                    
+                                    val sortedFrametimes = frametimes.sorted()
+                                    val fps1Percent = if (sortedFrametimes.isNotEmpty()) {
+                                        val idx = (sortedFrametimes.size * 0.99).toInt().coerceIn(0, sortedFrametimes.lastIndex)
+                                        val ft = sortedFrametimes[idx]
+                                        if (ft > 0) (1000.0 / ft).toInt() else 0
+                                    } else 0
+                                    
+                                    _frameStats.value = FrameStats(
+                                        fps = fps,
+                                        frametime = avgFrametime,
+                                        fps1Percent = fps1Percent,
+                                        processName = currentProcess,
+                                        isMonitoring = true
+                                    )
+                                    
+                                    frameCount = 0
+                                    totalFrametime = 0.0
+                                    frametimes.clear()
+                                    lastSecond = now
+                                }
+                            } catch (e: Exception) {}
+                        }
                     }
                 }
             } catch (e: Exception) {
                 // PresentMon failed, use fallback
                 startFallbackMonitor(scope)
+            } finally {
+                presentMonProcess?.destroy()
+                presentMonProcess = null
             }
         }
     }
