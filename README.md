@@ -1,4 +1,4 @@
-# VEXTIQ PRO v1 — Kotlin Edition
+# VEXTIQ PRO v1
 
 ## 🎮 Gaming Optimizer with Compose Desktop
 
