@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+build/
+bin/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# Kotlin
+.kotlin/
+kotlin-js-store/
+
+# Local/Binary/Build Output
+*.log
+*.zip
+VEXTIQ_Scan.zip
+scripts/test-output/
+
+# Resources / Binaries (can be downloaded by build script)
+src/main/resources/PresentMon.exe
+
+# OS generated
+.DS_Store
+Thumbs.db
