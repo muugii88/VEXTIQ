@@ -1,0 +1,27 @@
+build:
+  maxIssues: 0
+
+config:
+  validation: true
+  warningsAsErrors: false
+
+potential-bugs:
+  active: true
+
+style:
+  active: true
+
+complexity:
+  active: true
+
+naming:
+  active: true
+
+exceptions:
+  active: true
+
+empty-blocks:
+  active: true
+
+performance:
+  active: true
