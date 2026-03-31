@@ -1,87 +1,71 @@
-# VEXTIQ PRO v1
+# 🚀 VEXTIQ PRO v1.1
 
-## 🎮 Gaming Optimizer with Compose Desktop
+[![Kotlin](https://img.shields.io/badge/Kotlin-1.9-blue.svg?logo=kotlin)](https://kotlinlang.org)
+[![Compose Desktop](https://img.shields.io/badge/Compose_Desktop-1.5-blue?logo=jetpack-compose)](https://www.jetbrains.com/lp/compose-multiplatform/)
+[![Build](https://img.shields.io/badge/Build-Gradle_8.5-green?logo=gradle)](https://gradle.org)
 
-Modern, native desktop application built with Kotlin and Jetpack Compose.
+**VEXTIQ PRO** is a premium, high-performance gaming optimizer designed for Windows, built with **Kotlin** and **Jetpack Compose Desktop**. It provides real-time system monitoring and one-click optimizations to ensure your hardware is fully dedicated to your gaming experience.
 
 ---
 
-## 📦 Requirements
+## ✨ What's New in v1.1
 
-- **JDK 17+** — Download from https://adoptium.net/
-- **Gradle** — Included (gradlew)
+- 🧠 **Adaptive Optimization Agent**: Introducing the new `AdaptiveOptimizer` which monitors frame stability and dynamically adjusts system resources to prevent frame drops in real-time.
+- 🎮 **New Game Profiles**: Added optimized profiles for **Battlefield 6**, **CS2**, and **Valorant**. 
+- 🎯 **Advanced Process Detection**: Enhanced logic to correctly identify active games while ignoring background chatter like Discord.
+- 💎 **Cyber-Theme UI Polish**: Refined "Cyber" design with smoother transitions and a more intuitive navigation layout.
+- 🛠️ **Stability Suite**: Fixed several Kotlin compilation errors and optimized the MSI installer build process.
+
+---
+
+## 🎨 Key Features
+
+- ⚡ **Smart Boost** — Instant system-wide optimization for low-latency gaming.
+- 📊 **Real-time Analytics** — Professional-grade monitoring of CPU, GPU, and RAM usage via the OSHI library.
+- 🎯 **11+ Custom Profiles** — Pre-tuned settings for the world's most popular competitive titles.
+- 💻 **State-of-the-Art UI** — A modern, native desktop interface that looks and feels like the future of gaming.
+
+---
+
+## 📁 Project Architecture
+
+```text
+src/main/kotlin/com/vextiq/
+├── Main.kt              # App entry point & Navigation
+├── core/
+│   ├── Games.kt         # Pre-configured game definitions
+│   └── SystemMonitor.kt # Native monitoring logic (OSHI)
+├── optimizer/
+│   ├── Optimizer.kt     # Core hardware optimization
+│   └── AdaptiveOptimizer.kt # [NEW] Real-time AI adjustment
+└── ui/
+    ├── Theme.kt         # Global Cyber design tokens
+    └── Components.kt    # Premium UI elements
+```
 
 ---
 
 ## 🚀 Quick Start
 
-### Run in Development Mode
-```bash
-./gradlew run
-```
-Or on Windows:
-```bash
-gradlew.bat run
+### Development Mode
+```powershell
+./gradlew.bat run
 ```
 
-### Build EXE
-```bash
-./gradlew packageExe
+### Build MSI Installer
+```powershell
+./gradlew.bat packageMsi
 ```
-Output: `build/compose/binaries/main/exe/`
+The output will be available in: `build/compose/binaries/main/msi/`
 
 ---
 
-## 🎨 Features
+## 📦 Requirements
 
-- ⚡ **Smart Boost** — One-click game optimization
-- 📊 **Real-time Stats** — CPU, GPU, RAM monitoring (OSHI library)
-- 🎯 **Game Profiles** — 11 games including Battlefield 6
-- 💻 **Native UI** — Compose Desktop with cyber theme
-- 🖥️ **Cross-platform** — Windows, macOS, Linux
+- **JDK 17+** (Adoptium recommend)
+- **Windows 10/11** (Recommended for MSI building)
+- **Gradle 8.5** (Bundled via `gradlew`)
 
 ---
 
-## 📁 Project Structure
-
-```
-src/main/kotlin/com/vextiq/
-├── Main.kt              # Application entry + UI pages
-├── core/
-│   ├── Games.kt         # Game definitions
-│   └── SystemMonitor.kt # OSHI-based monitoring
-├── optimizer/
-│   └── Optimizer.kt     # Optimization logic
-└── ui/
-    ├── Theme.kt         # Cyber color scheme
-    └── Components.kt    # Reusable UI components
-```
-
----
-
-## 🎮 Supported Games
-
-- 🚀 Star Citizen
-- ⚔️ Battlefield 6 (NEW!)
-- 🎖️ Battlefield 2042
-- 🌃 Cyberpunk 2077
-- 🚗 GTA V
-- 🎯 Valorant
-- 💣 CS2
-- 🔧 Rust
-- 🎒 Escape from Tarkov
-- 🪖 Call of Duty Warzone
-- 🏗️ Fortnite
-
----
-
-## 🔧 Technologies
-
-- **Kotlin 1.9** — Modern JVM language
-- **Compose Desktop 1.5** — Declarative UI
-- **OSHI 6.4** — Native system monitoring
-- **Gradle 8.5** — Build system
-
----
-
-Made with 💙 by VEXTIQ Team
+Made with 💙 by **VEXTIQ Team**
