@@ -20,7 +20,15 @@ data class SystemStats(
     val frametime: Double = 0.0,
     val latency: Int = 0,
     val activeGame: String = "",
-    val isGameRunning: Boolean = false
+    val isGameRunning: Boolean = false,
+    // Network extras (populated by NetworkMonitor)
+    val routerPingMs: Int = 0,
+    val packetLossPercent: Int = 0,
+    val jitterMs: Int = 0,
+    val gameServerIp: String = "",
+    val gameServerRegion: String = "",
+    val bestRegion: String = "",
+    val bestRegionPingMs: Int = 0
 )
 
 /**
@@ -41,20 +49,20 @@ data class HardwareInfo(
  * 
  * Uses HardwareManager singleton for hardware info (no duplicate detection!)
  */
-class SystemMonitor {
+class SystemMonitor(private val settings: SettingsManager = SettingsManager()) {
     private val systemInfo = SystemInfo()
     private val hardware = systemInfo.hardware
     private val processor = hardware.processor
     private val memory = hardware.memory
-    
+
     private var prevTicks: LongArray = processor.systemCpuLoadTicks
-    
+
     private val _stats = MutableStateFlow(SystemStats())
     val stats: StateFlow<SystemStats> = _stats
-    
+
     private val _hardwareInfo = MutableStateFlow(HardwareInfo())
     val hardwareInfo: StateFlow<HardwareInfo> = _hardwareInfo
-    
+
     private var monitorJob: Job? = null
     private var gpuVendor: String = "Unknown"
     private var lastGpuUsage: Int = 0
@@ -65,9 +73,11 @@ class SystemMonitor {
     private var lastActiveGame: String = ""
     private var isGameRunning: Boolean = false
     private var gpuCheckCounter = 0
-    
-    // FPS Monitor
-    private val fpsMonitor = FpsMonitor()
+    private var lastNet: NetworkMonitor.NetStats = NetworkMonitor.NetStats()
+
+    // FPS + Network monitors
+    private val fpsMonitor = FpsMonitor(settings)
+    private val networkMonitor = NetworkMonitor(settings)
     
     fun start(scope: CoroutineScope) {
         // Get hardware from singleton (ONE-TIME detection, shared with all modules)
@@ -89,17 +99,28 @@ class SystemMonitor {
         
         // Start FPS monitoring
         fpsMonitor.start(scope)
-        
-        // Collect FPS stats
+
+        // Start network monitoring
+        networkMonitor.start(scope)
+
+        // Collect FPS stats + update NetworkMonitor with active game
         scope.launch {
             fpsMonitor.frameStats.collect { stats ->
                 lastFps = stats.fps
                 lastFrametime = stats.frametime
                 lastActiveGame = stats.processName
                 isGameRunning = stats.isMonitoring && stats.fps > 0
+                networkMonitor.setActiveGame(stats.processName)
             }
         }
-        
+
+        // Collect NetworkMonitor stats
+        scope.launch {
+            networkMonitor.stats.collect { n ->
+                lastNet = n
+            }
+        }
+
         monitorJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 updateStats()
@@ -107,10 +128,11 @@ class SystemMonitor {
             }
         }
     }
-    
+
     fun stop() {
         monitorJob?.cancel()
         fpsMonitor.stop()
+        networkMonitor.stop()
     }
     
     fun isFpsMonitorAvailable(): Boolean = fpsMonitor.isAvailable()
@@ -132,9 +154,16 @@ class SystemMonitor {
         if (gpuCheckCounter % 2 == 0) {
             lastGpuUsage = getGpuUsage()
             lastGpuTemp = getGpuTemperature()
-            lastLatency = getNetworkLatency()
         }
-        
+
+        // Network latency: prefer game server ping from NetworkMonitor when available,
+        // otherwise fall back to generic latency probe
+        lastLatency = when {
+            lastNet.gameServerPingMs > 0 -> lastNet.gameServerPingMs
+            lastNet.routerPingMs > 0 -> lastNet.routerPingMs
+            else -> getNetworkLatency()
+        }
+
         _stats.value = SystemStats(
             cpuUsage = cpuUsage,
             gpuUsage = lastGpuUsage,
@@ -147,7 +176,14 @@ class SystemMonitor {
             frametime = lastFrametime,
             latency = lastLatency,
             activeGame = lastActiveGame,
-            isGameRunning = isGameRunning
+            isGameRunning = isGameRunning,
+            routerPingMs = lastNet.routerPingMs,
+            packetLossPercent = lastNet.packetLossPercent,
+            jitterMs = lastNet.jitterMs,
+            gameServerIp = lastNet.gameServerIp,
+            gameServerRegion = lastNet.gameServerRegion,
+            bestRegion = lastNet.bestRegion,
+            bestRegionPingMs = lastNet.bestRegionPingMs
         )
     }
     

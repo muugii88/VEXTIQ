@@ -21,7 +21,7 @@ import com.vextiq.optimizer.Optimizer
 import com.vextiq.ui.*
 import kotlinx.coroutines.launch
 
-enum class Page { DASHBOARD, GAMEBOOST, TOOLS, VPN, SETTINGS }
+enum class Page { DASHBOARD, GAMEBOOST, TOOLS, VPN, TROUBLESHOOT, SETTINGS }
 
 @Composable
 fun App(
@@ -159,6 +159,7 @@ fun App(
                     NavItem("🎮", "nav_boost".localized(), currentPage == Page.GAMEBOOST) { currentPage = Page.GAMEBOOST }
                     NavItem("🔧", "nav_tools".localized(), currentPage == Page.TOOLS) { currentPage = Page.TOOLS }
                     NavItem("🌐", "VPN", currentPage == Page.VPN) { currentPage = Page.VPN } // VPN is Global
+                    NavItem("🛠", "Troubleshoot", currentPage == Page.TROUBLESHOOT) { currentPage = Page.TROUBLESHOOT }
                     NavItem("⚙", "nav_settings".localized(), currentPage == Page.SETTINGS) { currentPage = Page.SETTINGS }
                 }
                 
@@ -432,6 +433,8 @@ fun App(
                     )
                     
                     Page.VPN -> VpnPage()
+
+                    Page.TROUBLESHOOT -> TroubleshootPage()
                     
                     Page.SETTINGS -> SettingsPage(
                         onLanguageChange = { lang ->
@@ -1125,6 +1128,10 @@ fun SettingsPage(
                 var showNet by remember { mutableStateOf(settings.overlayShowNet) }
                 var showFps by remember { mutableStateOf(settings.overlayShowFps) }
                 var showFt by remember { mutableStateOf(settings.overlayShowFrametime) }
+                var showWifi by remember { mutableStateOf(settings.overlayShowWifiBaseline) }
+                var showJitter by remember { mutableStateOf(settings.overlayShowJitter) }
+                var showPktLoss by remember { mutableStateOf(settings.overlayShowPacketLoss) }
+                var showRegion by remember { mutableStateOf(settings.overlayShowRegion) }
 
                 SettingToggle("Show FPS Counter", showFps) { showFps = it; settings.overlayShowFps = it }
                 SettingToggle("Show Frametime (FT)", showFt) { showFt = it; settings.overlayShowFrametime = it }
@@ -1132,9 +1139,27 @@ fun SettingsPage(
                 SettingToggle("Show CPU Usage", showCpu) { showCpu = it; settings.overlayShowCpu = it }
                 SettingToggle("Show RAM Usage", showRam) { showRam = it; settings.overlayShowRam = it }
                 SettingToggle("Show Network (Ping)", showNet) { showNet = it; settings.overlayShowNet = it }
+                SettingToggle("Show Region Label (SG/JP/KR/US/EU)", showRegion) { showRegion = it; settings.overlayShowRegion = it }
+                SettingToggle("Show WiFi Baseline Ping", showWifi) { showWifi = it; settings.overlayShowWifiBaseline = it }
+                SettingToggle("Show Jitter", showJitter) { showJitter = it; settings.overlayShowJitter = it }
+                SettingToggle("Show Packet Loss", showPktLoss) { showPktLoss = it; settings.overlayShowPacketLoss = it }
 
                 Divider(color = VextiqColors.Border)
-                
+
+                Text("Network & FPS", fontSize = 12.sp, color = VextiqColors.Primary, fontWeight = FontWeight.Bold)
+
+                var gameServerPing by remember { mutableStateOf(settings.gameServerPingEnabled) }
+                var regionalProbe by remember { mutableStateOf(settings.regionalProbingEnabled) }
+                var rawIcmp by remember { mutableStateOf(settings.rawIcmpEnabled) }
+                var etwFps by remember { mutableStateOf(settings.etwFpsEnabled) }
+
+                SettingToggle("Game Server Ping (detect real server)", gameServerPing) { gameServerPing = it; settings.gameServerPingEnabled = it }
+                SettingToggle("Regional Probing (find best region)", regionalProbe) { regionalProbe = it; settings.regionalProbingEnabled = it }
+                SettingToggle("Raw ICMP Ping (faster, no powershell)", rawIcmp) { rawIcmp = it; settings.rawIcmpEnabled = it }
+                SettingToggle("ETW FPS Monitor (own engine, no PresentMon.exe)", etwFps) { etwFps = it; settings.etwFpsEnabled = it }
+
+                Divider(color = VextiqColors.Border)
+
                 Text("settings_behavior".localized(), fontSize = 12.sp, color = VextiqColors.Primary, fontWeight = FontWeight.Bold)
                 
                 // Toggles

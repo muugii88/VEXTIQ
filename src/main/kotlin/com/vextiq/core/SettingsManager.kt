@@ -26,20 +26,20 @@ class SettingsManager {
                 settingsFile.inputStream().use { properties.load(it) }
             }
         } catch (e: Exception) {
-            // Ignore, use defaults
+            System.err.println("[SettingsManager] Failed to load ${settingsFile.absolutePath}: ${e.message} — using defaults")
         }
     }
-    
+
     /**
      * Save settings to file
      */
     fun save() {
         try {
-            settingsFile.outputStream().use { 
-                properties.store(it, "VEXTIQ PRO Settings") 
+            settingsFile.outputStream().use {
+                properties.store(it, "VEXTIQ PRO Settings")
             }
         } catch (e: Exception) {
-            // Ignore
+            System.err.println("[SettingsManager] Failed to save ${settingsFile.absolutePath}: ${e.message}")
         }
     }
     
@@ -145,4 +145,43 @@ class SettingsManager {
     var overlayShowFrametime: Boolean
         get() = properties.getProperty("overlayShowFrametime", "true").toBoolean()
         set(value) { properties.setProperty("overlayShowFrametime", value.toString()); save() }
+
+    // --- Network overlay extras ---
+    var overlayShowWifiBaseline: Boolean
+        get() = properties.getProperty("overlayShowWifiBaseline", "false").toBoolean()
+        set(value) { properties.setProperty("overlayShowWifiBaseline", value.toString()); save() }
+
+    var overlayShowPacketLoss: Boolean
+        get() = properties.getProperty("overlayShowPacketLoss", "false").toBoolean()
+        set(value) { properties.setProperty("overlayShowPacketLoss", value.toString()); save() }
+
+    var overlayShowJitter: Boolean
+        get() = properties.getProperty("overlayShowJitter", "false").toBoolean()
+        set(value) { properties.setProperty("overlayShowJitter", value.toString()); save() }
+
+    var overlayShowRegion: Boolean
+        get() = properties.getProperty("overlayShowRegion", "true").toBoolean()
+        set(value) { properties.setProperty("overlayShowRegion", value.toString()); save() }
+
+    // "fps" (default) or "network" — overlay mode
+    var overlayMode: String
+        get() = properties.getProperty("overlayMode", "fps")
+        set(value) { properties.setProperty("overlayMode", value); save() }
+
+    // --- Core monitoring toggles ---
+    var gameServerPingEnabled: Boolean
+        get() = properties.getProperty("gameServerPingEnabled", "true").toBoolean()
+        set(value) { properties.setProperty("gameServerPingEnabled", value.toString()); save() }
+
+    var regionalProbingEnabled: Boolean
+        get() = properties.getProperty("regionalProbingEnabled", "true").toBoolean()
+        set(value) { properties.setProperty("regionalProbingEnabled", value.toString()); save() }
+
+    var etwFpsEnabled: Boolean
+        get() = properties.getProperty("etwFpsEnabled", "true").toBoolean()
+        set(value) { properties.setProperty("etwFpsEnabled", value.toString()); save() }
+
+    var rawIcmpEnabled: Boolean
+        get() = properties.getProperty("rawIcmpEnabled", "true").toBoolean()
+        set(value) { properties.setProperty("rawIcmpEnabled", value.toString()); save() }
 }

@@ -3,6 +3,7 @@ package com.vextiq.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -32,25 +33,30 @@ fun FpsOverlay(
     onClose: () -> Unit
 ) {
     if (!isVisible) return
-    
-    // Position state - persists across recompositions
+
     var posX by remember { mutableStateOf(20f) }
     var posY by remember { mutableStateOf(20f) }
-    
-    // Independent window state
+    var mode by remember { mutableStateOf(settings.overlayMode) }
+
+    // Dynamic height based on visible rows
+    val visibleRows = computeVisibleRowCount(mode, settings, stats)
+    val targetHeight = (30 + visibleRows * 16).coerceAtLeast(80)
+
     val windowState = remember {
         WindowState(
             position = WindowPosition(posX.dp, posY.dp),
-            width = 140.dp,
-            height = 145.dp  // Increased for more content
+            width = 150.dp,
+            height = targetHeight.dp
         )
     }
-    
-    // Sync position
+
     LaunchedEffect(posX, posY) {
         windowState.position = WindowPosition(posX.dp, posY.dp)
     }
-    
+    LaunchedEffect(targetHeight) {
+        windowState.size = androidx.compose.ui.unit.DpSize(150.dp, targetHeight.dp)
+    }
+
     Window(
         onCloseRequest = onClose,
         title = "VEXTIQ",
@@ -76,62 +82,134 @@ fun FpsOverlay(
                 .padding(10.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                // Header with game name
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "VEXTIQ",
+                        if (mode == "network") "NET" else "VEXTIQ",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF00D2FF),
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.pointerInput(Unit) {
+                            detectTapGestures(onTap = {
+                                mode = if (mode == "network") "fps" else "network"
+                                settings.overlayMode = mode
+                            })
+                        }
                     )
                     if (stats.activeGame.isNotEmpty() && stats.isGameRunning) {
                         Text(
-                            stats.activeGame.take(8),
+                            stats.activeGame.take(10),
                             fontSize = 8.sp,
                             color = Color(0xFF888888),
                             fontFamily = FontFamily.Monospace
                         )
                     }
                 }
-                
+
                 Spacer(Modifier.height(2.dp))
-                
-                // FPS
-                if (settings.overlayShowFps) {
-                    StatRow("FPS", if (stats.fps > 0) "${stats.fps}" else "--", getFpsColor(stats.fps))
-                }
-                
-                // Frametime
-                if (settings.overlayShowFrametime) {
-                    val frametimeText = if (stats.frametime > 0) String.format("%.1fms", stats.frametime) else "--"
-                    StatRow("FT", frametimeText, getFrametimeColor(stats.frametime))
-                }
-                
-                // GPU
-                if (settings.overlayShowGpu) {
-                    StatRow("GPU", "${stats.gpuUsage}%", getUsageColor(stats.gpuUsage))
-                }
-                
-                // CPU
-                if (settings.overlayShowCpu) {
-                    StatRow("CPU", "${stats.cpuUsage}%", getUsageColor(stats.cpuUsage))
-                }
-                
-                // RAM
-                if (settings.overlayShowRam) {
-                    StatRow("RAM", "${stats.ramUsage}%", getUsageColor(stats.ramUsage))
-                }
-                
-                // Network Latency
-                if (settings.overlayShowNet) {
-                    StatRow("NET", if (stats.latency > 0) "${stats.latency}ms" else "--", getPingColor(stats.latency))
+
+                if (mode == "network") {
+                    renderNetworkMode(stats, settings)
+                } else {
+                    renderFpsMode(stats, settings)
                 }
             }
         }
+    }
+}
+
+private fun regionCode(region: String): String = when (region.lowercase()) {
+    "singapore" -> "SG"
+    "tokyo" -> "JP"
+    "hongkong", "hong kong" -> "HK"
+    "seoul" -> "KR"
+    "sydney" -> "AU"
+    "stockholm" -> "SE"
+    "us", "america", "n.america", "north america" -> "US"
+    "europe", "eu" -> "EU"
+    "asia" -> "AS"
+    "middle east", "me" -> "ME"
+    "brazil", "south america" -> "BR"
+    "india" -> "IN"
+    else -> region.take(2).uppercase()
+}
+
+@Composable
+private fun renderFpsMode(stats: SystemStats, settings: com.vextiq.core.SettingsManager) {
+    if (settings.overlayShowFps) {
+        StatRow("FPS", if (stats.fps > 0) "${stats.fps}" else "--", getFpsColor(stats.fps))
+    }
+    if (settings.overlayShowFrametime) {
+        val frametimeText = if (stats.frametime > 0) String.format("%.1fms", stats.frametime) else "--"
+        StatRow("FT", frametimeText, getFrametimeColor(stats.frametime))
+    }
+    if (settings.overlayShowGpu) {
+        StatRow("GPU", "${stats.gpuUsage}%", getUsageColor(stats.gpuUsage))
+    }
+    if (settings.overlayShowCpu) {
+        StatRow("CPU", "${stats.cpuUsage}%", getUsageColor(stats.cpuUsage))
+    }
+    if (settings.overlayShowRam) {
+        StatRow("RAM", "${stats.ramUsage}%", getUsageColor(stats.ramUsage))
+    }
+    if (settings.overlayShowNet) {
+        val netSuffix = if (settings.overlayShowRegion && stats.gameServerRegion.isNotEmpty()) {
+            " ${regionCode(stats.gameServerRegion)}"
+        } else ""
+        StatRow("NET", if (stats.latency > 0) "${stats.latency}ms$netSuffix" else "--", getPingColor(stats.latency))
+    }
+}
+
+@Composable
+private fun renderNetworkMode(stats: SystemStats, settings: com.vextiq.core.SettingsManager) {
+    val netSuffix = if (settings.overlayShowRegion && stats.gameServerRegion.isNotEmpty()) {
+        " ${regionCode(stats.gameServerRegion)}"
+    } else ""
+    StatRow("NET", if (stats.latency > 0) "${stats.latency}ms$netSuffix" else "--", getPingColor(stats.latency))
+
+    if (settings.overlayShowWifiBaseline) {
+        StatRow("WIFI", if (stats.routerPingMs > 0) "${stats.routerPingMs}ms" else "--", getPingColor(stats.routerPingMs))
+    }
+    if (settings.overlayShowJitter) {
+        StatRow("JIT", if (stats.jitterMs > 0) "${stats.jitterMs}ms" else "--", getJitterColor(stats.jitterMs))
+    }
+    if (settings.overlayShowPacketLoss) {
+        StatRow("PKT", "${stats.packetLossPercent}%", getLossColor(stats.packetLossPercent))
+    }
+    if (stats.bestRegion.isNotEmpty() && stats.bestRegion != stats.gameServerRegion) {
+        StatRow(
+            "BEST",
+            "${regionCode(stats.bestRegion)} ${stats.bestRegionPingMs}ms",
+            getPingColor(stats.bestRegionPingMs)
+        )
+    }
+}
+
+private fun computeVisibleRowCount(
+    mode: String,
+    settings: com.vextiq.core.SettingsManager,
+    stats: SystemStats
+): Int {
+    return if (mode == "network") {
+        var c = 1 // NET always shown in network mode
+        if (settings.overlayShowWifiBaseline) c++
+        if (settings.overlayShowJitter) c++
+        if (settings.overlayShowPacketLoss) c++
+        if (stats.bestRegion.isNotEmpty() && stats.bestRegion != stats.gameServerRegion) c++
+        c
+    } else {
+        var c = 0
+        if (settings.overlayShowFps) c++
+        if (settings.overlayShowFrametime) c++
+        if (settings.overlayShowGpu) c++
+        if (settings.overlayShowCpu) c++
+        if (settings.overlayShowRam) c++
+        if (settings.overlayShowNet) c++
+        c
     }
 }
 
@@ -171,5 +249,18 @@ private fun getPingColor(ping: Int) = when {
     ping <= 0 -> Color(0xFF666666)
     ping < 50 -> Color(0xFF00FF88)
     ping < 100 -> Color(0xFFFFCC00)
+    else -> Color(0xFFFF4444)
+}
+
+private fun getJitterColor(jitter: Int) = when {
+    jitter <= 0 -> Color(0xFF666666)
+    jitter < 5 -> Color(0xFF00FF88)
+    jitter < 15 -> Color(0xFFFFCC00)
+    else -> Color(0xFFFF4444)
+}
+
+private fun getLossColor(loss: Int) = when {
+    loss <= 0 -> Color(0xFF00FF88)
+    loss < 2 -> Color(0xFFFFCC00)
     else -> Color(0xFFFF4444)
 }
