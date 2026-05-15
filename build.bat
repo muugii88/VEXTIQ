@@ -38,17 +38,21 @@ if not exist "%PRESENTMON_PATH%" (
 echo.
 echo  [1] Run App (Development)
 echo  [2] Build MSI (Installer)
-echo  [3] Clean Build
-echo  [4] Build + Run
-echo  [5] Exit
+echo  [3] Build EXE (Installer)
+echo  [4] Build MSI + EXE
+echo  [5] Clean Build
+echo  [6] Build + Run
+echo  [7] Exit
 echo.
-set /p choice="Select option [1-5]: "
+set /p choice="Select option [1-7]: "
 
 if "%choice%"=="1" goto run
 if "%choice%"=="2" goto package
-if "%choice%"=="3" goto clean
-if "%choice%"=="4" goto buildrun
-if "%choice%"=="5" goto end
+if "%choice%"=="3" goto packageExe
+if "%choice%"=="4" goto packageBoth
+if "%choice%"=="5" goto clean
+if "%choice%"=="6" goto buildrun
+if "%choice%"=="7" goto end
 goto menu
 
 :run
@@ -85,6 +89,67 @@ if %ERRORLEVEL% EQU 0 (
 ) else (
     echo.
     echo [!] Build failed. Try option [3] Clean Build first.
+)
+goto menu
+
+:packageExe
+echo.
+echo [>>] Stopping any running VEXTIQ instances...
+taskkill /F /IM "VEXTIQ PRO.exe" /T >nul 2>&1
+taskkill /F /IM "PresentMon.exe" /T >nul 2>&1
+taskkill /F /IM java.exe /FI "WINDOWTITLE eq VEXTIQ*" >nul 2>&1
+taskkill /F /IM javaw.exe >nul 2>&1
+timeout /t 2 >nul
+
+echo [>>] Cleaning deep build directory for fresh installer...
+rmdir /s /q build\compose 2>nul
+rmdir /s /q build\kotlin 2>nul
+rmdir /s /q build\classes 2>nul
+
+echo [>>] Building EXE package...
+echo [i] This may take a few minutes...
+echo.
+call %GRADLE_PATH% --stop
+call %GRADLE_PATH% packageExe --no-daemon
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo [OK] Build successful!
+    echo [i] EXE location: build\compose\binaries\main\exe\
+    explorer build\compose\binaries\main\exe 2>nul
+) else (
+    echo.
+    echo [!] Build failed. Try option [5] Clean Build first.
+)
+goto menu
+
+:packageBoth
+echo.
+echo [>>] Stopping any running VEXTIQ instances...
+taskkill /F /IM "VEXTIQ PRO.exe" /T >nul 2>&1
+taskkill /F /IM "PresentMon.exe" /T >nul 2>&1
+taskkill /F /IM java.exe /FI "WINDOWTITLE eq VEXTIQ*" >nul 2>&1
+taskkill /F /IM javaw.exe >nul 2>&1
+timeout /t 2 >nul
+
+echo [>>] Cleaning deep build directory for fresh installers...
+rmdir /s /q build\compose 2>nul
+rmdir /s /q build\kotlin 2>nul
+rmdir /s /q build\classes 2>nul
+
+echo [>>] Building MSI + EXE packages...
+echo [i] This may take a few minutes...
+echo.
+call %GRADLE_PATH% --stop
+call %GRADLE_PATH% packageMsi packageExe --no-daemon
+if %ERRORLEVEL% EQU 0 (
+    echo.
+    echo [OK] Build successful!
+    echo [i] MSI location: build\compose\binaries\main\msi\
+    echo [i] EXE location: build\compose\binaries\main\exe\
+    explorer build\compose\binaries\main 2>nul
+) else (
+    echo.
+    echo [!] Build failed. Try option [5] Clean Build first.
 )
 goto menu
 

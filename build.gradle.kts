@@ -38,8 +38,8 @@ compose.desktop {
         mainClass = "com.vextiq.MainKt"
         
         nativeDistributions {
-            // MSI ONLY - proper Windows Installer with upgrade support
-            targetFormats(TargetFormat.Msi)
+            // MSI + EXE installers - both Windows Installer formats with upgrade support
+            targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "VEXTIQ PRO"
             packageVersion = "1.8.1"
             description = "VEXTIQ PRO Gaming Optimizer"
