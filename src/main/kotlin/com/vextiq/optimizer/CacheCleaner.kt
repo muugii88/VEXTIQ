@@ -218,4 +218,75 @@ class CacheCleaner {
             else -> "$bytes bytes"
         }
     }
+    
+    /**
+     * General clean - alias for cleanAll
+     */
+    fun clean(onLog: (String) -> Unit) {
+        cleanAll(onLog)
+    }
+    
+    /**
+     * Clean global shader caches (DX, NVIDIA, AMD)
+     */
+    fun cleanGlobalShaders(onLog: (String) -> Unit) {
+        onLog("[>>] Cleaning global shader caches...")
+        cleanNvidiaCache(onLog)
+        cleanAmdCache(onLog)
+        cleanDirectXCache(onLog)
+        onLog("[OK] Global shader caches cleaned!")
+    }
+    
+    /**
+     * Clean Star Citizen shader cache
+     */
+    fun cleanStarCitizenShaders(onLog: (String) -> Unit) {
+        cleanStarCitizenCache(onLog)
+    }
+    
+    /**
+     * Open Star Citizen AppData folder
+     */
+    fun openStarCitizenAppData() {
+        try {
+            val scPath = File("$localAppData\\Star Citizen")
+            if (scPath.exists()) {
+                Runtime.getRuntime().exec("explorer.exe \"${scPath.absolutePath}\"")
+            } else {
+                Runtime.getRuntime().exec("explorer.exe \"$localAppData\"")
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+    
+    /**
+     * Clean Windows Prefetch folder
+     */
+    fun cleanPrefetch(onLog: (String) -> Unit): CleanResult {
+        onLog("[>>] Cleaning Prefetch folder...")
+        val prefetchDir = File("C:\\Windows\\Prefetch")
+        var files = 0
+        var bytes = 0L
+        
+        if (prefetchDir.exists() && prefetchDir.isDirectory) {
+            prefetchDir.listFiles()?.forEach { file ->
+                try {
+                    if (file.isFile && file.name.endsWith(".pf")) {
+                        bytes += file.length()
+                        if (file.delete()) {
+                            files++
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Skip locked files
+                }
+            }
+            onLog("[OK] Cleaned $files prefetch files (${bytes / 1024} KB)")
+        } else {
+            onLog("[!] Prefetch folder not accessible (need admin)")
+        }
+        
+        return CleanResult(files, bytes, listOf("Prefetch"))
+    }
 }

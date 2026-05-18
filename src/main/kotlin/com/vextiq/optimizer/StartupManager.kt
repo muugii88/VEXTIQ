@@ -215,4 +215,11 @@ class StartupManager {
         onLog("[OK] Startup optimized - disabled $disabled items")
         return disabled
     }
+    
+    /**
+     * Alias for optimizeStartup
+     */
+    fun disableStartupApps(onLog: (String) -> Unit): Int {
+        return optimizeStartup(onLog)
+    }
 }

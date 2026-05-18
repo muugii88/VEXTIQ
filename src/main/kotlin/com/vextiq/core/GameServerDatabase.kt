@@ -9,12 +9,21 @@ object GameServerDatabase {
 
     enum class Protocol { UDP, TCP }
 
+    /**
+     * @param tickRateHz Server tick rate. Used to estimate in-game ping
+     *   (`networkRTT + 1000/tickHz`). Defaults to 30 (typical session-based game).
+     *   Set higher for competitive shooters: CS2/Valorant 64-128Hz, BF6 ~60Hz.
+     * @param gamePort Known UDP/TCP gameplay port. Used as the target for
+     *   [TcpPing] when a more accurate latency probe is needed.
+     */
     data class GameInfo(
         val id: String,
         val displayName: String,
         val processNames: List<String>,
         val protocol: Protocol,
-        val regions: Map<String, String>
+        val regions: Map<String, String>,
+        val tickRateHz: Int = 30,
+        val gamePort: Int? = null
     )
 
     private val games: List<GameInfo> = listOf(
@@ -23,6 +32,7 @@ object GameServerDatabase {
             displayName = "Valorant",
             processNames = listOf("VALORANT-Win64-Shipping", "VALORANT", "valorant"),
             protocol = Protocol.UDP,
+            tickRateHz = 128,
             regions = linkedMapOf(
                 "Singapore" to "gp-sg-sin-1.a.pvp.net",
                 "Tokyo"     to "gp-jp-tk-1.a.pvp.net",
@@ -38,6 +48,8 @@ object GameServerDatabase {
             displayName = "Counter-Strike 2",
             processNames = listOf("cs2"),
             protocol = Protocol.UDP,
+            tickRateHz = 64,
+            gamePort = 27015,
             regions = linkedMapOf(
                 "Singapore" to "scl.valve.net.sg",
                 "Tokyo"     to "tyo.valve.net.sg",
@@ -75,6 +87,7 @@ object GameServerDatabase {
             displayName = "Overwatch 2",
             processNames = listOf("Overwatch"),
             protocol = Protocol.UDP,
+            tickRateHz = 63,
             regions = linkedMapOf(
                 "Tokyo"     to "jp.actual.battle.net",
                 "Seoul"     to "kr.actual.battle.net",
@@ -99,6 +112,7 @@ object GameServerDatabase {
             displayName = "Apex Legends",
             processNames = listOf("r5apex"),
             protocol = Protocol.UDP,
+            tickRateHz = 20,
             regions = linkedMapOf(
                 "Tokyo"     to "ping-tok.ea.com",
                 "Singapore" to "ping-sin.ea.com",
@@ -172,6 +186,7 @@ object GameServerDatabase {
             displayName = "Battlefield 2042",
             processNames = listOf("BF2042", "bf2042", "battlefield"),
             protocol = Protocol.UDP,
+            tickRateHz = 60,
             regions = linkedMapOf(
                 "Tokyo"     to "ping-tok.ea.com",
                 "Singapore" to "ping-sin.ea.com",
@@ -197,6 +212,11 @@ object GameServerDatabase {
 
     fun findByProcessName(processName: String): GameInfo? {
         val cleaned = processName.removeSuffix(".exe").lowercase()
+        // Reject empty input: `"".contains(x)` is always true in the partial-match
+        // fallback below, so an empty process name (the startup state before any
+        // game is detected) used to match the first game in the list and triggered
+        // unwanted region probing for a game the user wasn't playing.
+        if (cleaned.isEmpty()) return null
         byProcess[cleaned]?.let { return it }
         // Partial match fallback
         return games.firstOrNull { g ->

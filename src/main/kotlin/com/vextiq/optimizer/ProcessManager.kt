@@ -1,10 +1,5 @@
 package com.vextiq.optimizer
 
-import com.vextiq.core.PowerShellRunner
-
-/**
- * Process Manager - Manage process priorities and affinity
- */
 class ProcessManager {
 
     data class ProcessInfo(
@@ -14,138 +9,153 @@ class ProcessManager {
         val cpuPercent: Double
     )
 
-    /**
-     * Set process priority to High
-     */
+    private fun runPowerShell(script: String): Pair<Int, String> {
+        val proc = ProcessBuilder(
+            listOf("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+        ).redirectErrorStream(true).start()
+        val output = proc.inputStream.bufferedReader().readText()
+        val exit = proc.waitFor()
+        return exit to output
+    }
+
+    private fun baseName(name: String) = name.removeSuffix(".exe").removeSuffix(".EXE")
+
     fun setHighPriority(processName: String, onLog: (String) -> Unit): Boolean {
         onLog("[>>] Setting $processName to High priority...")
-
-        val result = PowerShellRunner.exec(
-            listOf("wmic", "process", "where", "name='$processName'", "call", "setpriority", "128"),
-            timeoutSec = 10
-        )
-
-        return if (result.success) {
-            onLog("[OK] $processName priority set to High")
-            true
-        } else {
-            onLog("[!] Could not set priority for $processName${if (result.timedOut) " (timeout)" else ""}")
-            false
-        }
+        return setPriority(processName, "High", onLog)
     }
 
-    /**
-     * Set process priority to Realtime (use with caution!)
-     */
     fun setRealtimePriority(processName: String, onLog: (String) -> Unit): Boolean {
         onLog("[>>] Setting $processName to Realtime priority...")
+        val ok = setPriority(processName, "RealTime", onLog)
+        if (ok) onLog("[!] Warning: Realtime priority may cause system instability")
+        return ok
+    }
 
-        val result = PowerShellRunner.exec(
-            listOf("wmic", "process", "where", "name='$processName'", "call", "setpriority", "256"),
-            timeoutSec = 10
-        )
-
-        return if (result.success) {
-            onLog("[OK] $processName priority set to Realtime")
-            onLog("[!] Warning: Realtime priority may cause system instability")
-            true
-        } else {
-            onLog("[!] Could not set priority for $processName${if (result.timedOut) " (timeout)" else ""}")
+    private fun setPriority(processName: String, priorityClass: String, onLog: (String) -> Unit): Boolean {
+        val script = """
+            ${'$'}targets = Get-Process -Name '${baseName(processName)}' -ErrorAction SilentlyContinue
+            if (-not ${'$'}targets) { Write-Output 'NOT_FOUND'; exit 0 }
+            ${'$'}count = 0
+            foreach (${'$'}p in ${'$'}targets) {
+                try { ${'$'}p.PriorityClass = '$priorityClass'; ${'$'}count++ } catch {}
+            }
+            Write-Output "OK:${'$'}count"
+        """.trimIndent()
+        return try {
+            val (_, output) = runPowerShell(script)
+            when {
+                output.contains("NOT_FOUND") -> {
+                    onLog("[!] $processName not running")
+                    false
+                }
+                output.contains("OK:") -> {
+                    val count = output.substringAfter("OK:").trim().toIntOrNull() ?: 0
+                    onLog("[OK] $processName priority set to $priorityClass ($count process${if (count == 1) "" else "es"})")
+                    count > 0
+                }
+                else -> {
+                    onLog("[!] Could not set priority — admin rights may be required")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            onLog("[!] Error: ${e.message}")
             false
         }
     }
 
-    /**
-     * Set CPU affinity to performance cores only (for hybrid CPUs)
-     */
     fun setPerformanceCoreAffinity(processName: String, onLog: (String) -> Unit): Boolean {
         onLog("[>>] Setting $processName to P-cores only...")
-
-        // Intel 12th gen+: P-cores are typically first 8 cores → mask 0xFF
-        val affinityMask = "FF"
-        val cleanName = processName.removeSuffix(".exe")
-
-        val output = PowerShellRunner.runPowerShell(
-            """
-            ${'$'}proc = Get-Process -Name '$cleanName' -ErrorAction SilentlyContinue
-            if (${'$'}proc) {
-                ${'$'}proc.ProcessorAffinity = 0x$affinityMask
-                Write-Output "OK"
+        val script = """
+            ${'$'}targets = Get-Process -Name '${baseName(processName)}' -ErrorAction SilentlyContinue
+            if (-not ${'$'}targets) { Write-Output 'NOT_FOUND'; exit 0 }
+            ${'$'}count = 0
+            foreach (${'$'}p in ${'$'}targets) {
+                try { ${'$'}p.ProcessorAffinity = 0xFF; ${'$'}count++ } catch {}
             }
-            """.trimIndent(),
-            timeoutSec = 10
-        ).output
-
-        return if (output.contains("OK")) {
-            onLog("[OK] $processName affinity set to P-cores")
-            true
-        } else {
-            onLog("[!] Process not found or error")
+            Write-Output "OK:${'$'}count"
+        """.trimIndent()
+        return try {
+            val (_, output) = runPowerShell(script)
+            if (output.contains("OK:")) {
+                onLog("[OK] $processName affinity set to P-cores")
+                true
+            } else {
+                onLog("[!] Process not found or admin required")
+                false
+            }
+        } catch (e: Exception) {
+            onLog("[!] Error: ${e.message}")
             false
         }
     }
 
-    /**
-     * Kill process by name
-     */
     fun killProcess(processName: String, onLog: (String) -> Unit): Boolean {
         onLog("[>>] Killing $processName...")
-
-        val result = PowerShellRunner.exec(
-            listOf("taskkill", "/IM", processName, "/F"),
-            timeoutSec = 10
-        )
-
-        return if (result.timedOut) {
-            onLog("[!] taskkill timed out for $processName")
-            false
-        } else {
+        return try {
+            ProcessBuilder(listOf("taskkill", "/IM", processName, "/F"))
+                .redirectErrorStream(true).start().waitFor()
             onLog("[OK] $processName terminated")
             true
+        } catch (e: Exception) {
+            onLog("[!] Error: ${e.message}")
+            false
         }
     }
 
-    /**
-     * Get list of running processes
-     */
     fun getRunningProcesses(): List<ProcessInfo> {
+        val script = """
+            Get-Process | ForEach-Object {
+                "${'$'}(${'$'}_.Id)|${'$'}(${'$'}_.ProcessName)|${'$'}([math]::Round(${'$'}_.WorkingSet64/1MB))|${'$'}(if (${'$'}_.CPU) { [math]::Round(${'$'}_.CPU, 2) } else { 0 })"
+            }
+        """.trimIndent()
         return try {
-            PowerShellRunner.runPowerShell(
-                """
-                Get-Process | Select-Object Id, ProcessName,
-                @{N='MemMB';E={[math]::Round(${'$'}_.WorkingSet64/1MB)}},
-                @{N='CPU';E={${'$'}_.CPU}} |
-                ConvertTo-Json
-                """.trimIndent(),
-                timeoutSec = 20
-            )
-            // JSON parsing not implemented — callers don't currently consume this
-            emptyList()
+            val (_, output) = runPowerShell(script)
+            output.lineSequence()
+                .mapNotNull { line ->
+                    val parts = line.split("|")
+                    if (parts.size == 4) {
+                        val pid = parts[0].trim().toIntOrNull() ?: return@mapNotNull null
+                        val name = parts[1].trim()
+                        val memMB = parts[2].trim().toLongOrNull() ?: 0L
+                        val cpu = parts[3].trim().toDoubleOrNull() ?: 0.0
+                        ProcessInfo(pid, name, memMB, cpu)
+                    } else null
+                }
+                .toList()
         } catch (e: Exception) {
             emptyList()
         }
     }
 
-    /**
-     * Optimize system for gaming - lower priority of background processes
-     */
     fun optimizeForGaming(gameName: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing system for $gameName...")
 
         val backgroundProcesses = listOf(
-            "SearchIndexer.exe", "SearchHost.exe",
-            "OneDrive.exe", "Dropbox.exe",
-            "Spotify.exe", "Discord.exe",
-            "slack.exe", "Teams.exe"
+            "SearchIndexer", "SearchHost",
+            "OneDrive", "Dropbox",
+            "Spotify", "Discord",
+            "slack", "Teams"
         )
 
         var lowered = 0
-        for (proc in backgroundProcesses) {
-            val result = PowerShellRunner.exec(
-                listOf("wmic", "process", "where", "name='$proc'", "call", "setpriority", "64"),
-                timeoutSec = 5
-            )
-            if (result.success) lowered++
+        val script = """
+            ${'$'}names = @(${backgroundProcesses.joinToString(",") { "'$it'" }})
+            ${'$'}count = 0
+            foreach (${'$'}n in ${'$'}names) {
+                ${'$'}procs = Get-Process -Name ${'$'}n -ErrorAction SilentlyContinue
+                foreach (${'$'}p in ${'$'}procs) {
+                    try { ${'$'}p.PriorityClass = 'BelowNormal'; ${'$'}count++ } catch {}
+                }
+            }
+            Write-Output "LOWERED:${'$'}count"
+        """.trimIndent()
+        try {
+            val (_, output) = runPowerShell(script)
+            lowered = output.substringAfter("LOWERED:", "0").trim().toIntOrNull() ?: 0
+        } catch (e: Exception) {
+            // Ignore — non-fatal
         }
 
         if (lowered > 0) {
@@ -153,7 +163,6 @@ class ProcessManager {
         }
 
         setHighPriority(gameName, onLog)
-
         onLog("[OK] System optimized for gaming")
     }
 }

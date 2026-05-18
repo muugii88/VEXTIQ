@@ -13,25 +13,22 @@ import java.io.InputStreamReader
  * Method 1: PresentMon (most accurate) - bundled in resources or auto-downloaded
  * Method 2: GPU Performance Counters (fallback)
  */
-class FpsMonitor(private val settings: SettingsManager = SettingsManager()) {
-
+class FpsMonitor {
+    
     data class FrameStats(
         val fps: Int = 0,
         val frametime: Double = 0.0,
         val fps1Percent: Int = 0,
         val fps01Percent: Int = 0,
         val processName: String = "",
-        val isMonitoring: Boolean = false,
-        val source: String = ""
+        val isMonitoring: Boolean = false
     )
-
+    
     private val _frameStats = MutableStateFlow(FrameStats())
     val frameStats: StateFlow<FrameStats> = _frameStats
-
-    @Volatile private var monitorJob: Job? = null
-    @Volatile private var presentMonProcess: Process? = null
-    @Volatile private var etwMonitor: EtwFpsMonitor? = null
-    private val startLock = Any()
+    
+    private var monitorJob: Job? = null
+    private var presentMonProcess: Process? = null
     
     // VEXTIQ directory for tools
     private val vextiqDir = File(System.getProperty("user.home"), ".vextiq").also { it.mkdirs() }
@@ -51,11 +48,10 @@ class FpsMonitor(private val settings: SettingsManager = SettingsManager()) {
             val resourceStream = this::class.java.getResourceAsStream("/PresentMon.exe")
             if (resourceStream != null) {
                 vextiqDir.mkdirs()
-                resourceStream.use { input ->
-                    presentMonExe.outputStream().use { out ->
-                        input.copyTo(out)
-                    }
+                presentMonExe.outputStream().use { out ->
+                    resourceStream.copyTo(out)
                 }
+                resourceStream.close()
                 println("[FPS] PresentMon extracted to: ${presentMonExe.absolutePath}")
                 true
             } else {
@@ -99,65 +95,21 @@ class FpsMonitor(private val settings: SettingsManager = SettingsManager()) {
      */
     fun start(scope: CoroutineScope) {
         println("[FPS] Starting FPS monitor...")
-
-        synchronized(startLock) {
-            monitorJob?.cancel()
-            presentMonProcess?.destroyForcibly()
-            presentMonProcess = null
-            etwMonitor?.stop()
-            etwMonitor = null
-        }
-
-        // Try ETW first when enabled
-        if (settings.etwFpsEnabled) {
-            val etw = EtwFpsMonitor()
-            if (etw.isAvailable() && etw.start(scope)) {
-                println("[FPS] Using ETW (built-in, no external .exe)")
-                etwMonitor = etw
-                scope.launch {
-                    etw.stats.collect { s ->
-                        if (s.isRunning) {
-                            _frameStats.value = FrameStats(
-                                fps = s.fps,
-                                frametime = s.frametime,
-                                processName = s.processName,
-                                isMonitoring = true,
-                                source = "ETW"
-                            )
-                        }
-                    }
-                }
-                // Start a watchdog — if no FPS after 4s, drop to PresentMon path
-                scope.launch(Dispatchers.IO) {
-                    delay(4000)
-                    if (_frameStats.value.fps == 0) {
-                        println("[FPS] ETW produced no data (likely non-admin), falling back...")
-                        etw.stop()
-                        etwMonitor = null
-                        startPresentMonOrFallback(scope)
-                    }
-                }
-                return
-            } else {
-                println("[FPS] ETW unavailable: ${etw.stats.value.errorMessage}")
-            }
-        }
-
-        startPresentMonOrFallback(scope)
-    }
-
-    private fun startPresentMonOrFallback(scope: CoroutineScope) {
+        
         val presentMonPath = findPresentMon()
+        
         if (presentMonPath != null) {
             println("[FPS] Found PresentMon: $presentMonPath")
-            startPresentMon(scope, presentMonPath)
+            // Try PresentMon, but start fallback too in case it fails
             scope.launch(Dispatchers.IO) {
-                delay(2000)
+                delay(2000) // Wait 2 seconds
+                // If no FPS data after 2 seconds, PresentMon probably failed
                 if (_frameStats.value.fps == 0) {
                     println("[FPS] PresentMon not producing data, using fallback...")
                     startFallbackMonitor(scope)
                 }
             }
+            startPresentMon(scope, presentMonPath)
         } else {
             println("[FPS] PresentMon not found, using fallback monitor")
             startFallbackMonitor(scope)
@@ -168,108 +120,82 @@ class FpsMonitor(private val settings: SettingsManager = SettingsManager()) {
      * Start PresentMon monitoring
      */
     private fun startPresentMon(scope: CoroutineScope, path: String) {
-        val job = scope.launch(Dispatchers.IO) {
-            val localProcess = try {
-                ProcessBuilder(listOf(
+        monitorJob = scope.launch(Dispatchers.IO) {
+            try {
+                presentMonProcess = ProcessBuilder(listOf(
                     path,
                     "-output_stdout",
                     "-stop_existing_session",
                     "-no_header",
                     "-qpc_time"
                 )).redirectErrorStream(true).start()
-            } catch (e: Exception) {
-                println("[FPS] PresentMon start failed: ${e.message}")
-                startFallbackMonitor(scope)
-                return@launch
-            }
-
-            synchronized(startLock) { presentMonProcess = localProcess }
-
-            try {
-                localProcess.inputStream.bufferedReader().use { reader ->
+                
+                presentMonProcess!!.inputStream.bufferedReader().use { reader ->
                     _frameStats.value = _frameStats.value.copy(isMonitoring = true)
-
-                    val ignoreList = listOf(
-                        "Discord", "Spotify", "Chrome", "msedge", "Firefox", "Steam", "EpicGamesLauncher",
-                        "GalaxyClient", "Battle.net", "Origin", "EADesktop", "Taskmgr", "VEXTIQ", "explorer",
-                        "SearchHost", "StartMenuExperienceHost", "ApplicationFrameHost", "TextInputHost",
-                        "ShellExperienceHost", "NVIDIA Share", "RadeonSoftware", "RTSS", "Afterburner",
-                        "Overwolf", "Twitch", "Teams", "Slack", "Zoom", "WhatsApp"
-                    )
 
                     val processFrameCounts = mutableMapOf<String, Int>()
                     val processTotalTime = mutableMapOf<String, Double>()
-                    var lastSampleNs = System.nanoTime()
-                    val sampleWindowNs = 1_000_000_000L // 1 second
-
-                    while (isActive && localProcess.isAlive) {
+                    var lastSecond = System.currentTimeMillis()
+                    
+                    while (isActive && presentMonProcess?.isAlive == true) {
                         val line = reader.readLine() ?: break
                         val parts = line.split(",")
-                        if (parts.size < 6) continue
+                        
+                        if (parts.size >= 6) {
+                            try {
+                                val processName = parts[0].replace(".exe", "", ignoreCase = true)
+                                if (processName.contains("PresentMon", true) || processName == "Idle") continue
+                                
+                                val frametime = parts[5].toDoubleOrNull() ?: continue
+                                
+                                // Track frames for this process
+                                processFrameCounts[processName] = (processFrameCounts[processName] ?: 0) + 1
+                                processTotalTime[processName] = (processTotalTime[processName] ?: 0.0) + frametime
+                                
+                                val now = System.currentTimeMillis()
+                                if (now - lastSecond >= 800) {
+                                    val bestProcess = GameDetection.pickActiveGame(processFrameCounts)
 
-                        try {
-                            val processName = parts[0].replace(".exe", "", ignoreCase = true)
-                            if (processName.contains("PresentMon", true) || processName == "Idle") continue
-
-                            val frametime = parts[5].toDoubleOrNull() ?: continue
-
-                            processFrameCounts[processName] = (processFrameCounts[processName] ?: 0) + 1
-                            processTotalTime[processName] = (processTotalTime[processName] ?: 0.0) + frametime
-
-                            val now = System.nanoTime()
-                            if (now - lastSampleNs >= sampleWindowNs) {
-                                val candidate = processFrameCounts.entries
-                                    .filter { entry -> ignoreList.none { ignore -> entry.key.contains(ignore, true) } }
-                                    .maxByOrNull { it.value }
-
-                                val bestProcess = candidate?.key ?: processFrameCounts.maxByOrNull { it.value }?.key ?: ""
-
-                                if (bestProcess.isNotEmpty()) {
-                                    val count = processFrameCounts[bestProcess] ?: 0
-                                    val totalTime = processTotalTime[bestProcess] ?: 0.0
-                                    val avgFrametime = if (count > 0) totalTime / count else 0.0
-                                    val fps = if (avgFrametime > 0.0) (1000.0 / avgFrametime).toInt() else 0
-
-                                    _frameStats.value = FrameStats(
-                                        fps = fps,
-                                        frametime = avgFrametime,
-                                        processName = bestProcess,
-                                        isMonitoring = true
-                                    )
+                                    if (bestProcess.isNotEmpty()) {
+                                        val count = processFrameCounts[bestProcess] ?: 0
+                                        val totalTime = processTotalTime[bestProcess] ?: 0.0
+                                        val avgFrametime = if (count > 0) totalTime / count else 0.0
+                                        val fps = if (avgFrametime > 0) (1000.0 / avgFrametime).toInt() else 0
+                                        
+                                        _frameStats.value = FrameStats(
+                                            fps = fps,
+                                            frametime = avgFrametime,
+                                            processName = bestProcess,
+                                            isMonitoring = true
+                                        )
+                                    }
+                                    
+                                    processFrameCounts.clear()
+                                    processTotalTime.clear()
+                                    lastSecond = now
                                 }
-
-                                processFrameCounts.clear()
-                                processTotalTime.clear()
-                                lastSampleNs = now
+                            } catch (e: Exception) {
+                                println("Error parsing PresentMon output: ${e.message}")
                             }
-                        } catch (e: Exception) {
-                            println("Error parsing PresentMon output: ${e.message}")
                         }
                     }
                 }
             } catch (e: Exception) {
+                // PresentMon failed, use fallback
                 startFallbackMonitor(scope)
             } finally {
-                synchronized(startLock) {
-                    if (presentMonProcess === localProcess) presentMonProcess = null
-                }
-                try { localProcess.destroyForcibly() } catch (_: Exception) {}
+                presentMonProcess?.destroy()
+                presentMonProcess = null
             }
         }
-
-        synchronized(startLock) { monitorJob = job }
     }
     
     /**
      * Fallback: Use Windows GPU Performance Counters or DirectX Query
      */
     private fun startFallbackMonitor(scope: CoroutineScope) {
-        synchronized(startLock) {
-            monitorJob?.cancel()
-            presentMonProcess?.destroyForcibly()
-            presentMonProcess = null
-        }
-        val job = scope.launch(Dispatchers.IO) {
+        monitorJob?.cancel()
+        monitorJob = scope.launch(Dispatchers.IO) {
             println("[FPS] Fallback monitor started")
             _frameStats.value = _frameStats.value.copy(isMonitoring = true)
             
@@ -304,59 +230,133 @@ class FpsMonitor(private val settings: SettingsManager = SettingsManager()) {
                 delay(500)
             }
         }
-        synchronized(startLock) { monitorJob = job }
     }
-
+    
+    /**
+     * Try to read FPS from RTSS shared memory
+     */
+    private fun tryRtssMemory(): Int {
+        return try {
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
+                """
+                try {
+                    ${'$'}rtss = Get-Process "RTSS" -ErrorAction SilentlyContinue
+                    if (${'$'}rtss) {
+                        # RTSS is running, try to get FPS from OSD
+                        ${'$'}counter = (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples |
+                            Where-Object { ${'$'}_.CookedValue -gt 5 } | Measure-Object -Property CookedValue -Sum
+                        if (${'$'}counter.Sum -gt 10) {
+                            [math]::Round(60 * (${'$'}counter.Sum / 50))
+                        } else { 0 }
+                    } else { 0 }
+                } catch { 0 }
+                """.trimIndent()
+            )).redirectErrorStream(true).start()
+            
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            output.toIntOrNull() ?: 0
+        } catch (e: Exception) { 0 }
+    }
+    
     /**
      * Get FPS estimate from DirectX present statistics
      */
     private fun getDirectXFps(): Int {
-        return PowerShellRunner.runPowerShell(
-            """
-            try {
-                ${'$'}counters = Get-Counter '\GPU Engine(*)\Running Time' -ErrorAction SilentlyContinue
-                ${'$'}active = ${'$'}counters.CounterSamples | Where-Object { ${'$'}_.CookedValue -gt 100000 }
-                if (${'$'}active.Count -gt 0) {
-                    ${'$'}utilization = (${'$'}active | Measure-Object -Property CookedValue -Average).Average / 100000
-                    [math]::Min(240, [math]::Max(30, [math]::Round(${'$'}utilization * 2)))
-                } else { 0 }
-            } catch { 0 }
-            """.trimIndent(),
-            timeoutSec = 8
-        ).trimmedOutput().toIntOrNull() ?: 0
+        return try {
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
+                """
+                try {
+                    ${'$'}counters = Get-Counter '\GPU Engine(*)\Running Time' -ErrorAction SilentlyContinue
+                    ${'$'}active = ${'$'}counters.CounterSamples | Where-Object { ${'$'}_.CookedValue -gt 100000 }
+                    if (${'$'}active.Count -gt 0) {
+                        ${'$'}utilization = (${'$'}active | Measure-Object -Property CookedValue -Average).Average / 100000
+                        [math]::Min(240, [math]::Max(30, [math]::Round(${'$'}utilization * 2)))
+                    } else { 0 }
+                } catch { 0 }
+                """.trimIndent()
+            )).redirectErrorStream(true).start()
+            
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            output.toIntOrNull() ?: 0
+        } catch (e: Exception) { 0 }
     }
-
+    
     /**
      * Estimate FPS from GPU 3D Engine usage
      */
     private fun getGpuFpsEstimate(): Pair<Int, String> {
-        val ignoreRegex = "Discord|Spotify|Chrome|msedge|Firefox|Steam|EpicGamesLauncher|Taskmgr|VEXTIQ|explorer|SearchHost|StartMenuExperienceHost|ApplicationFrameHost|TextInputHost|ShellExperienceHost|NVIDIA Share|RadeonSoftware|RTSS|Afterburner|Overwolf|Twitch|Teams|Slack|Zoom|WhatsApp"
-
-        val processName = PowerShellRunner.runPowerShell(
-            "\$p = Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 -and \$_.ProcessName -notmatch '$ignoreRegex' } | Sort-Object CPU -Descending | Select-Object -First 1; if (\$p) { \$p.ProcessName } else { (Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName }",
-            timeoutSec = 8
-        ).trimmedOutput().ifEmpty { "Unknown" }
-
-        val fps = PowerShellRunner.runPowerShell(
-            """try {
-                ${'$'}s = (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -EA Stop).CounterSamples | Where { ${'$'}_.CookedValue -gt 1 }
-                ${'$'}gpu = (${'$'}s | Measure -Property CookedValue -Sum).Sum
-                if (${'$'}gpu -gt 5) { [math]::Min(300, [math]::Max(15, [math]::Round((${'$'}gpu / 100) * 120 + 30))) } else { 0 }
-            } catch { 0 }""",
-            timeoutSec = 8
-        ).trimmedOutput().toIntOrNull() ?: 0
-
-        return Pair(fps, processName)
-    }
-
-    fun stop() {
-        synchronized(startLock) {
-            monitorJob?.cancel()
-            presentMonProcess?.destroyForcibly()
-            presentMonProcess = null
-            etwMonitor?.stop()
-            etwMonitor = null
+        return try {
+            // Get foreground process name - smarter detection
+            val ignoreRegex = "Discord|Spotify|Chrome|msedge|Firefox|Steam|EpicGamesLauncher|Taskmgr|VEXTIQ|explorer|SearchHost|StartMenuExperienceHost|ApplicationFrameHost|TextInputHost|ShellExperienceHost|NVIDIA Share|RadeonSoftware|RTSS|Afterburner|Overwolf|Twitch|Teams|Slack|Zoom|WhatsApp"
+            val nameProcess = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
+                "\$p = Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 -and \$_.ProcessName -notmatch '$ignoreRegex' } | Sort-Object CPU -Descending | Select-Object -First 1; if (\$p) { \$p.ProcessName } else { (Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName }"
+            )).redirectErrorStream(true).start()
+            val processName = nameProcess.inputStream.bufferedReader().readText().trim().ifEmpty { "Unknown" }
+            nameProcess.waitFor()
+            
+            // Get GPU 3D usage
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
+                """try { 
+                    ${'$'}s = (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -EA Stop).CounterSamples | Where { ${'$'}_.CookedValue -gt 1 }
+                    ${'$'}gpu = (${'$'}s | Measure -Property CookedValue -Sum).Sum
+                    if (${'$'}gpu -gt 5) { [math]::Min(300, [math]::Max(15, [math]::Round((${'$'}gpu / 100) * 120 + 30))) } else { 0 }
+                } catch { 0 }"""
+            )).redirectErrorStream(true).start()
+            
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            val fps = output.toIntOrNull() ?: 0
+            
+            Pair(fps, processName)
+        } catch (e: Exception) {
+            Pair(0, "Unknown")
         }
+    }
+    
+    /**
+     * Download PresentMon automatically
+     */
+    private fun downloadPresentMon(): Boolean {
+        return try {
+            val url = "https://github.com/GameTechDev/PresentMon/releases/download/v1.10.0/PresentMon-1.10.0-x64.exe"
+            println("[FPS] Downloading PresentMon from GitHub...")
+
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
+                "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; " +
+                "Invoke-WebRequest -Uri '$url' -OutFile '${presentMonExe.absolutePath}' -UseBasicParsing"
+            )).redirectErrorStream(true).start()
+
+            val output = process.inputStream.bufferedReader().readText()
+            val exit = process.waitFor()
+            val ok = exit == 0 && presentMonExe.exists() && presentMonExe.length() > 100_000
+
+            if (ok) {
+                println("[FPS] PresentMon downloaded successfully (${presentMonExe.length() / 1024}KB)")
+            } else {
+                System.err.println(
+                    "[FPS] PresentMon download FAILED (exit=$exit). " +
+                    "Likely cause: no internet, firewall, or GitHub blocked. " +
+                    "FPS will use GPU-counter fallback (less accurate)."
+                )
+                if (output.isNotBlank()) System.err.println("[FPS]   PowerShell output: ${output.take(300)}")
+            }
+            ok
+        } catch (e: Exception) {
+            System.err.println("[FPS] PresentMon download threw: ${e.message}. Using fallback.")
+            false
+        }
+    }
+    
+    fun stop() {
+        monitorJob?.cancel()
+        presentMonProcess?.destroyForcibly()
         _frameStats.value = FrameStats(isMonitoring = false)
     }
 }

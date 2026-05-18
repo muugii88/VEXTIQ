@@ -23,7 +23,7 @@ object Strings {
     private val english = mapOf(
         // App
         "app_name" to "VEXTIQ PRO",
-        "app_version" to "v1.8.1",
+        "app_version" to "v2.0",
         "system_online" to "System Online",
         
         // Navigation
@@ -84,7 +84,7 @@ object Strings {
         "check_updates" to "Check for updates",
         
         // Messages
-        "msg_initialized" to "[OK] VEXTIQ PRO v11 initialized",
+        "msg_initialized" to "[OK] VEXTIQ PRO v2.0 initialized",
         "msg_monitoring" to "[OK] Real-time monitoring active",
         "msg_select_game" to "[i] Select a game and click OPTIMIZE NOW",
         "msg_boost_complete" to "[OK] BOOST COMPLETE!",
@@ -112,7 +112,7 @@ object Strings {
     private val mongolian = mapOf(
         // App
         "app_name" to "VEXTIQ PRO",
-        "app_version" to "v1.8.1",
+        "app_version" to "v2.0",
         "system_online" to "Систем идэвхтэй",
         
         // Navigation
@@ -173,7 +173,7 @@ object Strings {
         "check_updates" to "Шинэчлэл шалгах",
         
         // Messages
-        "msg_initialized" to "[OK] VEXTIQ PRO v11 эхэлсэн",
+        "msg_initialized" to "[OK] VEXTIQ PRO v2.0 эхэлсэн",
         "msg_monitoring" to "[OK] Бодит цагийн хяналт идэвхтэй",
         "msg_select_game" to "[i] Тоглоом сонгоод OPTIMIZE дарна уу",
         "msg_boost_complete" to "[OK] BOOST ДУУССАН!",

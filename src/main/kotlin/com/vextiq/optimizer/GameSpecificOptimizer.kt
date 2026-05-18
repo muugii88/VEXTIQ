@@ -2,6 +2,10 @@ package com.vextiq.optimizer
 
 import java.io.File
 import com.vextiq.core.GamePaths
+import com.vextiq.brain.GameBrainLibrary
+import com.vextiq.brain.FPSPredictor
+import com.vextiq.brain.MLOptimizer
+import com.vextiq.brain.RTXOptimizer
 
 /**
  * Game-Specific Optimizer - Deep optimizations for each game
@@ -10,8 +14,13 @@ class GameSpecificOptimizer {
     
     private val userHome = System.getProperty("user.home")
     private val documentsPath = "$userHome\\Documents"
+    private val localAppData = System.getenv("LOCALAPPDATA") ?: "$userHome\\AppData\\Local"
     private val gamePaths = GamePaths()
     private val vextiqBrain = VextiqBrain()
+    private val gameBrainLibrary = GameBrainLibrary()
+    private val fpsPredictor = FPSPredictor()
+    private val mlOptimizer = MLOptimizer()
+    private val rtxOptimizer = RTXOptimizer()
     
     /**
      * Optimize specific game with Playstyle support
@@ -22,6 +31,9 @@ class GameSpecificOptimizer {
         if (savedPath != null) {
             onLog("[i] Using saved path: $savedPath")
         }
+        
+        // Show Brain Library tips before optimization
+        showGameBrainInfo(gameId, onLog)
         
         when (gameId) {
             "star_citizen" -> optimizeStarCitizen(playstyle, onLog)
@@ -67,6 +79,72 @@ class GameSpecificOptimizer {
         // Try to scan and find
         gamePaths.scanAllLaunchers { }
         return gamePaths.getPath(gameId)
+    }
+    
+    /**
+     * Show Brain Library info (tips, known issues, FPS prediction, RTX recs, ML data) before optimization
+     */
+    private fun showGameBrainInfo(gameId: String, onLog: (String) -> Unit) {
+        // Map gameId to library name
+        val libraryName = when (gameId) {
+            "star_citizen" -> "Star Citizen"
+            "cyberpunk", "cyberpunk_2077" -> "Cyberpunk 2077"
+            "bg3" -> "Baldur's Gate 3"
+            else -> null
+        }
+        
+        if (libraryName != null) {
+            val profile = gameBrainLibrary.getGameProfile(libraryName)
+            if (profile != null) {
+                onLog("")
+                onLog("[BRAIN] Game Engine: ${profile.engine}")
+                
+                if (profile.knownIssues.isNotEmpty()) {
+                    onLog("[BRAIN] Known Issues:")
+                    profile.knownIssues.take(3).forEach { onLog("  $it") }
+                }
+                
+                if (profile.expertTips.isNotEmpty()) {
+                    onLog("[BRAIN] Expert Tips:")
+                    profile.expertTips.take(3).forEach { onLog("  $it") }
+                }
+                onLog("")
+            }
+        }
+        
+        try {
+            val hw = com.vextiq.core.HardwareManager.getHardware()
+            if (hw.cpuName != "Unknown" && hw.gpuName != "Unknown") {
+                // FPS Prediction
+                val prediction = fpsPredictor.getPrediction(
+                    config = mapOf("r_GraphicsQuality" to 2, "r_ShadowRes" to 2, "r_PostProcess" to 2),
+                    gpuVram = hw.gpuVramGB,
+                    cpuCores = hw.cpuCores,
+                    cpuFreqMhz = hw.cpuFreqMHz,
+                    resolution = "${hw.resWidth}x${hw.resHeight}"
+                )
+                onLog("[PREDICT] Estimated FPS: ~${prediction.averageFps} (1% low: ~${prediction.fps1Percent})")
+                onLog("[PREDICT] ${prediction.recommendation}")
+                
+                // RTX/DLSS/FSR Recommendations
+                val capabilities = rtxOptimizer.detectCapabilities(hw.gpuName, hw.gpuVendor, hw.gpuVramGB)
+                val gpuTier = vextiqBrain.optimize(gameId, onLog = {}).gpuTier // Get tier silently
+                val rtxRec = rtxOptimizer.getRecommendation(capabilities, gpuTier)
+                rtxOptimizer.logRecommendation(rtxRec, onLog)
+                
+                // ML History check
+                val mlConfidence = mlOptimizer.getConfidence(gameId, gpuTier)
+                val mlAvgFps = mlOptimizer.getAverageFps(gameId, gpuTier)
+                if (mlConfidence > 30) {
+                    onLog("[ML] History confidence: ${mlConfidence}% (${mlOptimizer.getTotalRecords()} records)")
+                    if (mlAvgFps > 0) onLog("[ML] Historical avg FPS: ~$mlAvgFps")
+                }
+                
+                onLog("")
+            }
+        } catch (e: Exception) {
+            // Skip if hardware not detected
+        }
     }
     
     /**
@@ -649,5 +727,57 @@ class GameSpecificOptimizer {
         }
         
         applyGenericOptimizations("division_2", playstyle, onLog)
+    }
+    
+    /**
+     * Generate optimized Star Citizen USER.cfg
+     */
+    fun generateStarCitizenConfig(onLog: (String) -> Unit) {
+        onLog("[>>] Generating Star Citizen USER.cfg...")
+        
+        val hw = detectHardwareForConfig()
+        val config = buildString {
+            appendLine("; VEXTIQ PRO - Star Citizen Optimized Config")
+            appendLine("; Generated for: ${hw.vramGB}GB VRAM, ${hw.ramGB}GB RAM")
+            appendLine()
+            appendLine("Con_Restricted = 0")
+            appendLine("r_displayinfo = 3")
+            appendLine()
+            appendLine("; Performance")
+            appendLine("r_VSync = 0")
+            appendLine("sys_maxfps = 0")
+            appendLine()
+            appendLine("; Memory")
+            if (hw.ramGB >= 32) {
+                appendLine("r_TexturesStreamPoolSize = 4096")
+            } else {
+                appendLine("r_TexturesStreamPoolSize = 2048")
+            }
+            appendLine()
+            appendLine("; Shader Cache")
+            appendLine("r_shadersAllowCompilation = 1")
+            appendLine("r_shadersAsyncCompiling = 1")
+            appendLine()
+            appendLine("; Graphics Quality")
+            if (hw.vramGB >= 12) {
+                appendLine("r_ShadowsPoolSize = 8192")
+            } else {
+                appendLine("r_ShadowsPoolSize = 4096")
+            }
+        }
+        
+        try {
+            val scLive = java.io.File(localAppData, "Star Citizen\\LIVE")
+            if (scLive.exists() || scLive.mkdirs()) {
+                val configFile = java.io.File(scLive, "USER.cfg")
+                configFile.writeText(config)
+                onLog("[OK] USER.cfg generated!")
+                onLog("[i] Path: ${configFile.absolutePath}")
+            } else {
+                onLog("[!] Star Citizen LIVE folder not found")
+            }
+        } catch (e: Exception) {
+            onLog("[!] Error: ${e.message}")
+        }
     }
 }

@@ -20,15 +20,7 @@ data class SystemStats(
     val frametime: Double = 0.0,
     val latency: Int = 0,
     val activeGame: String = "",
-    val isGameRunning: Boolean = false,
-    // Network extras (populated by NetworkMonitor)
-    val routerPingMs: Int = 0,
-    val packetLossPercent: Int = 0,
-    val jitterMs: Int = 0,
-    val gameServerIp: String = "",
-    val gameServerRegion: String = "",
-    val bestRegion: String = "",
-    val bestRegionPingMs: Int = 0
+    val isGameRunning: Boolean = false
 )
 
 /**
@@ -49,20 +41,20 @@ data class HardwareInfo(
  * 
  * Uses HardwareManager singleton for hardware info (no duplicate detection!)
  */
-class SystemMonitor(private val settings: SettingsManager = SettingsManager()) {
+class SystemMonitor {
     private val systemInfo = SystemInfo()
     private val hardware = systemInfo.hardware
     private val processor = hardware.processor
     private val memory = hardware.memory
-
+    
     private var prevTicks: LongArray = processor.systemCpuLoadTicks
-
+    
     private val _stats = MutableStateFlow(SystemStats())
     val stats: StateFlow<SystemStats> = _stats
-
+    
     private val _hardwareInfo = MutableStateFlow(HardwareInfo())
     val hardwareInfo: StateFlow<HardwareInfo> = _hardwareInfo
-
+    
     private var monitorJob: Job? = null
     private var gpuVendor: String = "Unknown"
     private var lastGpuUsage: Int = 0
@@ -73,16 +65,38 @@ class SystemMonitor(private val settings: SettingsManager = SettingsManager()) {
     private var lastActiveGame: String = ""
     private var isGameRunning: Boolean = false
     private var gpuCheckCounter = 0
-    private var lastNet: NetworkMonitor.NetStats = NetworkMonitor.NetStats()
+    
+    // FPS Monitors — ETW preferred (native, no .exe), PresentMon fallback
+    private val etwFpsMonitor = EtwFpsMonitor()
+    private val fpsMonitor = FpsMonitor()
+    @Volatile private var etwActive = false
+    
+    // NOTE: brain/AdaptiveOptimizer.kt exists but is intentionally NOT wired —
+    // it mutates an in-memory config map and notifies listeners that nobody
+    // subscribes to, so its "Increased shadow resolution" logs had no real
+    // effect on any game. Bringing it back requires writing the produced
+    // config out to each game's actual config file (CryEngine .cfg / RTSS / etc.)
+    // before re-enabling the start/stop calls.
 
-    // FPS + Network monitors
-    private val fpsMonitor = FpsMonitor(settings)
+    // Adaptive Tuner - throttles background apps on stutter spikes
+    private val settings = SettingsManager()
+    private val adaptiveTuner = AdaptiveTuner(
+        frametimeProvider = { lastFrametime },
+        gameProvider = { lastActiveGame }
+    )
+    private var adaptiveTunerStarted = false
+
+    // Network Monitor — game-aware latency probing
     private val networkMonitor = NetworkMonitor(settings)
+    val networkStats: StateFlow<NetworkMonitor.NetStats> get() = networkMonitor.stats
     
     fun start(scope: CoroutineScope) {
+        CrashLogger.log("SystemMonitor.start() begin")
         // Get hardware from singleton (ONE-TIME detection, shared with all modules)
         scope.launch(Dispatchers.IO) {
+            CrashLogger.log("HardwareManager.detect() launching")
             HardwareManager.detect()
+            CrashLogger.log("HardwareManager.detect() complete")
             val hw = HardwareManager.hardware.value
             gpuVendor = hw.gpuVendor
             
@@ -97,42 +111,89 @@ class SystemMonitor(private val settings: SettingsManager = SettingsManager()) {
             )
         }
         
-        // Start FPS monitoring
-        fpsMonitor.start(scope)
+        // ETW is currently DISABLED. The EventTraceLogfile JNA mapping declares
+        // CurrentEvent and LogfileHeader as Pointer? (8 bytes each), but the real
+        // Windows EVENT_TRACE_LOGFILEW has them as inline EVENT_TRACE (~184 B) and
+        // TRACE_LOGFILE_HEADER (~280 B) structs. As a result the EventRecordCallback
+        // ends up at the wrong byte offset, and when admin lets StartTraceW succeed
+        // (non-admin returns ACCESS_DENIED and we never get this far), OpenTraceW
+        // reads a garbage function pointer and ProcessTrace dispatches into it →
+        // EXCEPTION_ACCESS_VIOLATION on launch. Re-enable only after the struct
+        // layout is properly mapped.
+        // ETW (native, ~1ms, no extra process) is the primary FPS source. The
+        // EventTraceLogfile struct now uses byte-array placeholders so the
+        // EventRecordCallback offset matches Windows EVENT_TRACE_LOGFILEW.
+        // Without that fix this used to crash on admin launch.
+        CrashLogger.log("EtwFpsMonitor.start() begin")
+        etwActive = try {
+            etwFpsMonitor.start(scope)
+        } catch (t: Throwable) {
+            CrashLogger.log("[ERR] EtwFpsMonitor.start() threw: ${t.javaClass.name}: ${t.message}")
+            false
+        }
+        CrashLogger.log("EtwFpsMonitor.start() returned active=$etwActive")
+        if (etwActive) {
+            println("[FPS] ETW monitor active (Microsoft-Windows-DXGI)")
+            scope.launch {
+                etwFpsMonitor.stats.collect { s ->
+                    if (!s.isRunning) return@collect
+                    lastFps = s.fps
+                    lastFrametime = s.frametime
+                    lastActiveGame = s.processName
+                    isGameRunning = s.fps > 0 && s.processName.isNotEmpty()
+                    handleGameLifecycle(scope)
+                }
+            }
+        } else {
+            println("[FPS] ETW unavailable (${etwFpsMonitor.stats.value.errorMessage}); using PresentMon fallback")
+            fpsMonitor.start(scope)
+        }
 
-        // Start network monitoring
-        networkMonitor.start(scope)
-
-        // Collect FPS stats + update NetworkMonitor with active game
+        // Collect FPS stats + manage AdaptiveOptimizer lifecycle
         scope.launch {
             fpsMonitor.frameStats.collect { stats ->
+                if (etwActive) return@collect // ETW is authoritative
                 lastFps = stats.fps
                 lastFrametime = stats.frametime
                 lastActiveGame = stats.processName
                 isGameRunning = stats.isMonitoring && stats.fps > 0
-                networkMonitor.setActiveGame(stats.processName)
+                handleGameLifecycle(scope)
             }
         }
-
-        // Collect NetworkMonitor stats
-        scope.launch {
-            networkMonitor.stats.collect { n ->
-                lastNet = n
-            }
-        }
-
+        
         monitorJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 updateStats()
                 delay(1000)
             }
         }
+
+        // Game-aware network latency probing
+        CrashLogger.log("NetworkMonitor.start() begin")
+        networkMonitor.start(scope)
+        CrashLogger.log("SystemMonitor.start() complete")
+    }
+    
+    private fun handleGameLifecycle(scope: CoroutineScope) {
+        if (isGameRunning && !adaptiveTunerStarted && settings.adaptiveTuningEnabled) {
+            adaptiveTuner.start(scope) { println(it) }
+            adaptiveTunerStarted = true
+        } else if (!isGameRunning && adaptiveTunerStarted) {
+            adaptiveTuner.stop()
+            adaptiveTunerStarted = false
+        }
+
+        // Keep NetworkMonitor's active game in sync with FPS detection.
+        // Empty string means "no game" → NetworkMonitor will skip game-server probing.
+        networkMonitor.setActiveGame(if (isGameRunning) lastActiveGame else "")
     }
 
     fun stop() {
         monitorJob?.cancel()
+        etwFpsMonitor.stop()
         fpsMonitor.stop()
         networkMonitor.stop()
+        adaptiveTuner.stop()
     }
     
     fun isFpsMonitorAvailable(): Boolean = fpsMonitor.isAvailable()
@@ -154,16 +215,16 @@ class SystemMonitor(private val settings: SettingsManager = SettingsManager()) {
         if (gpuCheckCounter % 2 == 0) {
             lastGpuUsage = getGpuUsage()
             lastGpuTemp = getGpuTemperature()
+            // Latency: prefer NetworkMonitor's game-aware ping estimate when available.
+            // Fall back to the legacy in-house probe only if NetworkMonitor has no data yet.
+            val netStats = networkMonitor.stats.value
+            lastLatency = when {
+                netStats.gamePingEstimateMs > 0 -> netStats.gamePingEstimateMs
+                netStats.gameServerPingMs > 0 -> netStats.gameServerPingMs
+                else -> getNetworkLatency()
+            }
         }
-
-        // Network latency: prefer game server ping from NetworkMonitor when available,
-        // otherwise fall back to generic latency probe
-        lastLatency = when {
-            lastNet.gameServerPingMs > 0 -> lastNet.gameServerPingMs
-            lastNet.routerPingMs > 0 -> lastNet.routerPingMs
-            else -> getNetworkLatency()
-        }
-
+        
         _stats.value = SystemStats(
             cpuUsage = cpuUsage,
             gpuUsage = lastGpuUsage,
@@ -176,14 +237,7 @@ class SystemMonitor(private val settings: SettingsManager = SettingsManager()) {
             frametime = lastFrametime,
             latency = lastLatency,
             activeGame = lastActiveGame,
-            isGameRunning = isGameRunning,
-            routerPingMs = lastNet.routerPingMs,
-            packetLossPercent = lastNet.packetLossPercent,
-            jitterMs = lastNet.jitterMs,
-            gameServerIp = lastNet.gameServerIp,
-            gameServerRegion = lastNet.gameServerRegion,
-            bestRegion = lastNet.bestRegion,
-            bestRegionPingMs = lastNet.bestRegionPingMs
+            isGameRunning = isGameRunning
         )
     }
     
@@ -224,21 +278,19 @@ class SystemMonitor(private val settings: SettingsManager = SettingsManager()) {
     
     private fun getNetworkLatency(): Int {
         return try {
-            // Priority 1: Game Server (if detected)
-            val gameLatency = getGameServerLatency()
-            if (gameLatency > 10) return gameLatency
+            // Priority 1: Game Server (use active game from FPS monitor)
+            val activeProcess = lastActiveGame.ifEmpty { null }
+            val gameLatency = getGameServerLatency(activeProcess)
+            if (gameLatency > 0) return gameLatency
             
-            // Priority 2: Regional Master Servers
-            val coreServers = listOf(
-                "8.8.8.8",                  // Google (Global Baseline)
-                "1.1.1.1",                  // Cloudflare
-                "ping-iad.ds.ea.com",       // EA East
-                "ping-lhr.ds.ea.com",       // EA Europe
-                "public.cloudimperiumgames.com" // Star Citizen
-            )
+            // Priority 2: Broad search via netstat
+            val broadLatency = getBroadGameLatency()
+            if (broadLatency > 0) return broadLatency
             
-            var bestLatency = 999
-            for (server in coreServers) {
+            // Priority 3: Simple ping to reliable low-latency servers
+            // This gives baseline network latency (always works, no admin needed)
+            val fallbackServers = listOf("1.1.1.1", "8.8.8.8")
+            for (server in fallbackServers) {
                 try {
                     val process = ProcessBuilder(listOf(
                         "ping", "-n", "1", "-w", "500", server
@@ -246,55 +298,143 @@ class SystemMonitor(private val settings: SettingsManager = SettingsManager()) {
                     val output = process.inputStream.bufferedReader().readText()
                     process.waitFor()
                     
-                    // Improved Regex: Handle various languages and formats
-                    // Common: "time=56ms", "time<1ms", "хугацаа=56мс", "время=56мс"
-                    val match = "(\\d+)\\s*(ms|мс)".toRegex(RegexOption.IGNORE_CASE).find(output)
+                    val match = "(\\d+)\\s*(ms|мс|мил|мсек)".toRegex(RegexOption.IGNORE_CASE).find(output)
                     val latency = match?.groupValues?.get(1)?.toIntOrNull()
-                    
-                    if (latency != null && latency > 0 && latency < bestLatency) {
-                        bestLatency = latency
-                        if (bestLatency < 100) break // Good enough
-                    }
-                } catch (e: Exception) {
-                    println("Error pinging $server: ${e.message}")
-                }
+                    if (latency != null && latency > 0) return latency
+                } catch (e: Exception) { /* skip */ }
             }
-            
-            if (bestLatency < 999) bestLatency else 0
+            0
         } catch (e: Exception) { 0 }
     }
     
     /**
      * Get latency from active game's network connections
+     * Uses FPS monitor's detected process name for accurate detection
+     * Checks BOTH TCP and UDP connections (games use UDP for real-time data!)
      */
-    private fun getGameServerLatency(): Int {
+    private fun getGameServerLatency(activeGameProcess: String?): Int {
+        return try {
+            // Only trust FPS-monitor-detected name if it passes the game filter.
+            // Without this guard a brief misidentification (Discord, browser) would
+            // get appended to the keyword regex and the next Get-Process call would
+            // happily pick Discord again. The keyword fallback below uses only the
+            // hardcoded whitelist, never the live process name.
+            val trustedActive = activeGameProcess
+                ?.takeIf { it.length > 2 && !GameDetection.isIgnored(it) }
+            val gameKeywords = if (trustedActive != null) {
+                "$trustedActive|StarCitizen|starcitizen|BF2042|battlefield|Cyberpunk|cs2|valorant|VALORANT|r5apex|Fortnite|Tarkov|Rust|cod|DeltaForce|deltaforce|DFBarracks|XDefiant|xdefiant|HellLetLoose|Squad|Overwatch|PUBG|TslGame|destiny2|TheFinals|EscapeFrom|ModernWarfare|Warzone|BlackOps"
+            } else {
+                "StarCitizen|starcitizen|BF2042|battlefield|Cyberpunk|cs2|valorant|VALORANT|r5apex|Fortnite|Tarkov|Rust|cod|DeltaForce|deltaforce|DFBarracks|XDefiant|xdefiant|HellLetLoose|Squad|Overwatch|PUBG|TslGame|destiny2|TheFinals|EscapeFrom|ModernWarfare|Warzone|BlackOps"
+            }
+            
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
+                """
+                ${'$'}gameKeywords = '$gameKeywords'
+                ${'$'}gameProc = Get-Process | Where-Object { ${'$'}_.ProcessName -match ${'$'}gameKeywords } | Select-Object -First 1
+                
+                if (${'$'}gameProc) {
+                    ${'$'}pid = ${'$'}gameProc.Id
+                    ${'$'}serverIP = ${'$'}null
+                    
+                    # Method 1: TCP connections (lobby, matchmaking)
+                    ${'$'}tcp = Get-NetTCPConnection -OwningProcess ${'$'}pid -State Established -ErrorAction SilentlyContinue |
+                        Where-Object { 
+                            ${'$'}_.RemoteAddress -notmatch '^(127\.|0\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1|fe80|255\.)' -and
+                            ${'$'}_.RemoteAddress -match '^\d+\.\d+\.\d+\.\d+${'$'}'
+                        }
+                    if (${'$'}tcp) {
+                        ${'$'}gameConn = ${'$'}tcp | Where-Object { ${'$'}_.RemotePort -notin @(80, 443, 8080) } | Select-Object -First 1
+                        if (-not ${'$'}gameConn) { ${'$'}gameConn = ${'$'}tcp | Select-Object -First 1 }
+                        ${'$'}serverIP = ${'$'}gameConn.RemoteAddress
+                    }
+                    
+                    # Method 2: UDP via netstat (game servers use UDP for real-time!)
+                    if (-not ${'$'}serverIP) {
+                        ${'$'}udpLines = netstat -ano -p UDP 2>${'$'}null | Where-Object { ${'$'}_ -match "${'$'}pid${'$'}" }
+                        foreach (${'$'}line in ${'$'}udpLines) {
+                            if (${'$'}line -match '(\d+\.\d+\.\d+\.\d+):(\d+)\s') {
+                                ${'$'}ip = ${'$'}Matches[1]
+                                if (${'$'}ip -notmatch '^(127\.|0\.|10\.|192\.168\.|172\.|255\.|0\.0\.0\.0|\*|::)') {
+                                    ${'$'}serverIP = ${'$'}ip
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    
+                    # Method 3: ALL netstat connections for this PID (TCP + UDP)
+                    if (-not ${'$'}serverIP) {
+                        ${'$'}allLines = netstat -ano 2>${'$'}null | Where-Object { ${'$'}_ -match "${'$'}pid${'$'}" -and ${'$'}_ -match 'ESTABLISHED|UDP' }
+                        foreach (${'$'}line in ${'$'}allLines) {
+                            if (${'$'}line -match '\s+(\d+\.\d+\.\d+\.\d+):(\d+)\s') {
+                                ${'$'}ip = ${'$'}Matches[1]
+                                ${'$'}port = [int]${'$'}Matches[2]
+                                if (${'$'}ip -notmatch '^(127\.|0\.|10\.|192\.168\.|172\.|255\.|0\.0\.0\.0)' -and ${'$'}port -notin @(80,443)) {
+                                    ${'$'}serverIP = ${'$'}ip
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    
+                    # Ping the found server IP
+                    if (${'$'}serverIP) {
+                        ${'$'}result = Test-Connection -ComputerName ${'$'}serverIP -Count 1 -ErrorAction SilentlyContinue
+                        if (${'$'}result) {
+                            ${'$'}val = ${'$'}result.Latency
+                            if (-not ${'$'}val) { ${'$'}val = ${'$'}result.ResponseTime }
+                            if (${'$'}val) { [math]::Round(${'$'}val) } else { 0 }
+                        }
+                    }
+                }
+                """.trimIndent()
+            )).redirectErrorStream(true).start()
+            
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            output.toIntOrNull() ?: 0
+        } catch (e: Exception) { 0 }
+    }
+    
+    /**
+     * Broad search: Find ANY non-system process with game-like connections
+     * Checks both TCP AND UDP via netstat
+     */
+    private fun getBroadGameLatency(): Int {
         return try {
             val process = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command",
                 """
-                # 1. Broad game process list
-                ${'$'}gameKeywords = 'StarCitizen|starcitizen|BF2042|battlefield|Cyberpunk|cs2|valorant|VALORANT|r5apex|Fortnite|Tarkov|Rust|cod'
-                ${'$'}gameProc = Get-Process | Where-Object { ${'$'}_.ProcessName -match ${'$'}gameKeywords } | Select-Object -First 1
+                ${'$'}ignore = 'chrome|msedge|firefox|Discord|Spotify|Steam|EpicGames|Teams|Slack|Zoom|svchost|lsass|csrss|wininit|services|SearchHost|OneDrive|Dropbox|Code|idea|python|node|VEXTIQ|explorer|Taskmgr|RuntimeBroker|dwm|conhost|RTSS|Afterburner|audiodg|WmiPrvSE|dllhost|sihost|fontdrvhost'
                 
-                if (${'$'}gameProc) {
-                    # 2. Look for established connections
-                    ${'$'}conns = Get-NetTCPConnection -OwningProcess ${'$'}gameProc.Id -State Established -ErrorAction SilentlyContinue | 
-                        Where-Object { 
-                            ${'$'}_.RemoteAddress -notmatch '^(127\.|0\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1|fe80|255\.)' -and
-                            ${'$'}_.RemoteAddress -match '^\d+\.\d+\.\d+\.\d+$'
-                        }
-                    
-                    if (${'$'}conns) {
-                        ${'$'}serverIP = (${'$'}conns | Select-Object -First 1).RemoteAddress
-                        ${'$'}result = Test-Connection -ComputerName ${'$'}serverIP -Count 1 -ErrorAction SilentlyContinue
-                        if (${'$'}result) { 
-                            # Safe Latency/ResponseTime check (PS 5.1 vs 7)
-                            ${'$'}val = ${'$'}result.Latency
-                            if (-not ${'$'}val) { ${'$'}val = ${'$'}result.ResponseTime }
-                            [math]::Round(${'$'}val)
+                # Use netstat for both TCP+UDP
+                ${'$'}lines = netstat -ano 2>${'$'}null | Where-Object { ${'$'}_ -match 'ESTABLISHED|UDP' }
+                ${'$'}checked = @{}
+                
+                foreach (${'$'}line in ${'$'}lines) {
+                    if (${'$'}line -match '\s+(\d+\.\d+\.\d+\.\d+):(\d+)\s+.*\s+(\d+)${'$'}') {
+                        ${'$'}ip = ${'$'}Matches[1]
+                        ${'$'}port = [int]${'$'}Matches[2]
+                        ${'$'}pid = [int]${'$'}Matches[3]
+                        
+                        if (${'$'}ip -match '^(127\.|0\.|10\.|192\.168\.|172\.|255\.|0\.0\.0\.0)') { continue }
+                        if (${'$'}port -in @(80, 443, 8080, 8443)) { continue }
+                        if (${'$'}checked.ContainsKey(${'$'}pid)) { continue }
+                        ${'$'}checked[${'$'}pid] = ${'$'}true
+                        
+                        ${'$'}proc = Get-Process -Id ${'$'}pid -ErrorAction SilentlyContinue
+                        if (${'$'}proc -and ${'$'}proc.ProcessName -notmatch ${'$'}ignore) {
+                            ${'$'}result = Test-Connection -ComputerName ${'$'}ip -Count 1 -ErrorAction SilentlyContinue
+                            if (${'$'}result) {
+                                ${'$'}val = ${'$'}result.Latency
+                                if (-not ${'$'}val) { ${'$'}val = ${'$'}result.ResponseTime }
+                                if (${'$'}val -and ${'$'}val -gt 0) { [math]::Round(${'$'}val); exit }
+                            }
                         }
                     }
                 }
+                0
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             

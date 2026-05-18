@@ -1,13 +1,11 @@
 package com.vextiq.optimizer
 
-import com.vextiq.core.PowerShellRunner
-
 /**
  * Advanced Performance Booster
  * All tweaks work WITHOUT admin rights where possible
  */
 class AdvancedBooster {
-
+    
     /**
      * 1. Timer Resolution - Reduce input lag by 10-15ms
      * Sets Windows timer to 0.5ms (default is 15.6ms)
@@ -15,7 +13,7 @@ class AdvancedBooster {
      */
     fun setTimerResolution(onLog: (String) -> Unit): Boolean {
         onLog("[>>] Setting timer resolution to 0.5ms (Persistent)...")
-
+        
         return try {
             val result = NtDll.INSTANCE.NtSetTimerResolution(5000, true, IntArray(1))
             if (result == 0) {
@@ -25,23 +23,21 @@ class AdvancedBooster {
                 onLog("[!] Native call failed (NTSTATUS: $result)")
                 false
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             onLog("[!] Native error: ${e.message}")
+            // Fallback to powershell if JNA fails
             onLog("[i] Applying fallback method...")
             runTimerPowerShell(onLog)
         }
     }
 
     private fun runTimerPowerShell(onLog: (String) -> Unit): Boolean {
-        val script = "Add-Type '@\nusing System;using System.Runtime.InteropServices;public class NtDll{[DllImport(\"ntdll.dll\")]public static extern int NtSetTimerResolution(int d,bool s,out int c);}\n@'; \$c=0; [NtDll]::NtSetTimerResolution(5000,\$true,[ref]\$c)"
-        val result = PowerShellRunner.runPowerShell(script, timeoutSec = 10)
-        return if (result.success) {
+        return try {
+            val script = "Add-Type '@\nusing System;using System.Runtime.InteropServices;public class NtDll{[DllImport(\"ntdll.dll\")]public static extern int NtSetTimerResolution(int d,bool s,out int c);}\n@'; \$c=0; [NtDll]::NtSetTimerResolution(5000,\$true,[ref]\$c)"
+            ProcessBuilder("powershell", "-Command", script).start()
             onLog("[i] Fallback applied (Effect may be temporary)")
             true
-        } else {
-            onLog("[!] Fallback failed${if (result.timedOut) " (timeout)" else ""}")
-            false
-        }
+        } catch (e: Exception) { false }
     }
 
     // JNA Interface for ntdll.dll
@@ -70,9 +66,11 @@ class AdvancedBooster {
             )
             
             for (cmd in commands) {
-                PowerShellRunner.runCmd(cmd, timeoutSec = 10)
+                val process = ProcessBuilder(listOf("cmd", "/c", cmd))
+                    .redirectErrorStream(true).start()
+                process.waitFor()
             }
-
+            
             onLog("[OK] Core parking disabled - all cores active")
             true
         } catch (e: Exception) {
@@ -102,9 +100,13 @@ class AdvancedBooster {
                     Write-Output "OK"
                 } catch { Write-Output "PARTIAL" }
             """.trimIndent()
-
-            PowerShellRunner.runPowerShell(script, timeoutSec = 15)
-
+            
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command", script
+            )).redirectErrorStream(true).start()
+            
+            process.waitFor()
+            
             onLog("[OK] GPU scheduler optimized")
             true
         } catch (e: Exception) {
@@ -120,10 +122,15 @@ class AdvancedBooster {
         onLog("[>>] Checking memory compression...")
         
         return try {
-            val output = PowerShellRunner.runPowerShell(
+            // Check current state (disable requires admin)
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "Get-MMAgent | Select-Object -ExpandProperty MemoryCompression"
-            ).trimmedOutput()
-
+            )).redirectErrorStream(true).start()
+            
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (output.equals("True", ignoreCase = true)) {
                 onLog("[i] Memory compression is ON (admin needed to disable)")
                 onLog("[i] Run as admin: Disable-MMAgent -MemoryCompression")
@@ -165,9 +172,14 @@ class AdvancedBooster {
                     Write-Output "NONE"
                 }
             """.trimIndent()
-
-            val output = PowerShellRunner.runPowerShell(script, timeoutSec = 20).output
-
+            
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command", script
+            )).redirectErrorStream(true).start()
+            
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+            
             if (output.contains("OK:")) {
                 val adapter = output.substringAfter("OK:").trim()
                 onLog("[OK] Optimized: $adapter")
@@ -205,9 +217,13 @@ class AdvancedBooster {
                 
                 Write-Output "OK"
             """.trimIndent()
-
-            PowerShellRunner.runPowerShell(script, timeoutSec = 15)
-
+            
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command", script
+            )).redirectErrorStream(true).start()
+            
+            process.waitFor()
+            
             onLog("[OK] Mouse acceleration disabled, raw input enabled")
             onLog("[i] USB polling rate: check mouse software (1000Hz recommended)")
             true
@@ -239,9 +255,13 @@ class AdvancedBooster {
                 
                 Write-Output "OK"
             """.trimIndent()
-
-            PowerShellRunner.runPowerShell(script, timeoutSec = 15)
-
+            
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command", script
+            )).redirectErrorStream(true).start()
+            
+            process.waitFor()
+            
             onLog("[OK] Visual effects optimized for performance")
             true
         } catch (e: Exception) {
@@ -257,17 +277,22 @@ class AdvancedBooster {
         onLog("[>>] Setting Ultimate Performance power plan...")
         
         return try {
-            val ultimateResult = PowerShellRunner.exec(
-                listOf("powercfg", "/setactive", "e9a42b02-d5df-448d-aa00-03f14749eb61"),
-                timeoutSec = 10
-            )
-
-            if (!ultimateResult.success) {
-                val highPerfResult = PowerShellRunner.exec(
-                    listOf("powercfg", "/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"),
-                    timeoutSec = 10
-                )
-                if (highPerfResult.success) {
+            // Try to activate Ultimate Performance (may not exist on all systems)
+            var process = ProcessBuilder(listOf(
+                "powercfg", "/setactive", "e9a42b02-d5df-448d-aa00-03f14749eb61"
+            )).redirectErrorStream(true).start()
+            
+            var exitCode = process.waitFor()
+            
+            if (exitCode != 0) {
+                // Try High Performance instead
+                process = ProcessBuilder(listOf(
+                    "powercfg", "/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+                )).redirectErrorStream(true).start()
+                
+                exitCode = process.waitFor()
+                
+                if (exitCode == 0) {
                     onLog("[OK] High Performance power plan activated")
                 } else {
                     onLog("[i] Using current power plan")
@@ -275,19 +300,20 @@ class AdvancedBooster {
             } else {
                 onLog("[OK] Ultimate Performance power plan activated")
             }
-
+            
+            // Additional power tweaks
             val tweaks = listOf(
-                "powercfg /setacvalueindex scheme_current sub_processor PERFBOOSTMODE 2",
-                "powercfg /setacvalueindex scheme_current sub_processor PERFBOOSTPOL 100",
-                "powercfg /setacvalueindex scheme_current sub_processor PERFINCPOL 2",
-                "powercfg /setacvalueindex scheme_current sub_processor PERFDECPOL 1",
+                "powercfg /setacvalueindex scheme_current sub_processor PERFBOOSTMODE 2",  // Aggressive boost
+                "powercfg /setacvalueindex scheme_current sub_processor PERFBOOSTPOL 100", // Max boost
+                "powercfg /setacvalueindex scheme_current sub_processor PERFINCPOL 2",     // Aggressive increase
+                "powercfg /setacvalueindex scheme_current sub_processor PERFDECPOL 1",     // Single decrease
                 "powercfg /setactive scheme_current"
             )
-
+            
             for (cmd in tweaks) {
-                PowerShellRunner.runCmd(cmd, timeoutSec = 10)
+                ProcessBuilder(listOf("cmd", "/c", cmd)).redirectErrorStream(true).start().waitFor()
             }
-
+            
             onLog("[OK] CPU boost settings optimized")
             true
         } catch (e: Exception) {
@@ -314,9 +340,13 @@ class AdvancedBooster {
                 
                 Write-Output "OK"
             """.trimIndent()
-
-            PowerShellRunner.runPowerShell(script, timeoutSec = 15)
-
+            
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command", script
+            )).redirectErrorStream(true).start()
+            
+            process.waitFor()
+            
             onLog("[OK] Fullscreen optimizations disabled globally")
             true
         } catch (e: Exception) {
@@ -344,9 +374,13 @@ class AdvancedBooster {
                 
                 Write-Output "OK"
             """.trimIndent()
-
-            PowerShellRunner.runPowerShell(script, timeoutSec = 15)
-
+            
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command", script
+            )).redirectErrorStream(true).start()
+            
+            process.waitFor()
+            
             onLog("[OK] Background apps disabled")
             true
         } catch (e: Exception) {
@@ -379,15 +413,13 @@ class AdvancedBooster {
                     Write-Output "OK"
                 } else { Write-Output "NOTFOUND" }
             """.trimIndent()
-
-            PowerShellRunner.runPowerShell(script, timeoutSec = 15)
-
+            
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
+            process.waitFor()
+            
             onLog("[OK] System prioritized for gaming (MMCSS High)")
             true
-        } catch (e: Exception) {
-            onLog("[!] MMCSS error: ${e.message}")
-            false
-        }
+        } catch (e: Exception) { false }
     }
     
     /**
@@ -396,14 +428,12 @@ class AdvancedBooster {
     fun setGamePriority(onLog: (String) -> Unit): Boolean {
         onLog("[>>] Setting global game priority...")
         return try {
+            // Set Game DVR and standard games to high priority
             val script = "Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name 'ForegroundLockTimeout' -Value 0 -Type DWord"
-            PowerShellRunner.runPowerShell(script, timeoutSec = 10)
+            ProcessBuilder("powershell", "-Command", script).start().waitFor()
             onLog("[OK] Game priority set")
             true
-        } catch (e: Exception) {
-            onLog("[!] Game priority error: ${e.message}")
-            false
-        }
+        } catch (e: Exception) { false }
     }
 
     /**
@@ -457,9 +487,11 @@ class AdvancedBooster {
                 
                 Write-Output "OK"
             """.trimIndent()
-
-            val output = PowerShellRunner.runPowerShell(script, timeoutSec = 30).trimmedOutput()
-
+            
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (output == "OK") {
                 onLog("[OK] Fixed Pagefile set to ${sizeMB / 1024}GB on C:")
                 onLog("[i] Fixed pagefile prevents dynamic resizing lag.")
@@ -498,9 +530,11 @@ class AdvancedBooster {
                 }
                 Write-Output "OK"
             """.trimIndent()
-
-            val output = PowerShellRunner.runPowerShell(script, timeoutSec = 30).trimmedOutput()
-
+            
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (output.contains("OK")) {
                 onLog("[OK] MSI Mode enabled for GPU and Network devices")
                 onLog("[i] This reduces 'stuttering' by streamlining interrupts.")
@@ -572,9 +606,11 @@ class AdvancedBooster {
                 }
                 Write-Output "OK"
             """.trimIndent()
-
-            val output = PowerShellRunner.runPowerShell(script, timeoutSec = 30).trimmedOutput()
-
+            
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (output.contains("OK")) {
                 onLog("[OK] 10+ Background services disabled")
                 onLog("[i] Frees up CPU cycles and RAM for gaming.")
@@ -618,9 +654,11 @@ class AdvancedBooster {
                 powercfg /S SCHEME_CURRENT
                 Write-Output "OK"
             """.trimIndent()
-
-            val output = PowerShellRunner.runPowerShell(script, timeoutSec = 30).trimmedOutput()
-
+            
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (output.contains("OK")) {
                 onLog("[OK] USB Power Saving disabled (Always High Speed)")
                 onLog("[OK] PCIe Link State Power Management: OFF")
@@ -662,9 +700,11 @@ class AdvancedBooster {
                 }
                 Write-Output "OK"
             """.trimIndent()
-
-            val output = PowerShellRunner.runPowerShell(script, timeoutSec = 15).trimmedOutput()
-
+            
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (output.contains("OK")) {
                 onLog("[OK] P-Core pinning applied to active games")
                 onLog("[i] Prevents E-Core stuttering on hybrid CPUs.")
@@ -687,9 +727,11 @@ class AdvancedBooster {
         onLog("[>>] Purging Windows Standby Memory Cache...")
         return try {
             val fallbackScript = "Get-Process | ForEach-Object { try { [Runtime.InteropServices.Marshal]::SetProcessWorkingSetSize(${'$'}_.Handle, -1, -1) } catch {} }; Write-Output 'OK'"
-
-            val output = PowerShellRunner.runPowerShell(fallbackScript, timeoutSec = 30).trimmedOutput()
-
+            
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", fallbackScript)).start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (output.contains("OK")) {
                 onLog("[OK] Standby List & Working Sets purged")
                 onLog("[i] Frees up immediate blocks of physical RAM.")
@@ -822,9 +864,11 @@ class AdvancedBooster {
                 
                 Write-Output "OK"
             """.trimIndent()
-
-            val output = PowerShellRunner.runPowerShell(script, timeoutSec = 60).trimmedOutput()
-
+            
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (output.contains("OK")) {
                 onLog("[OK] System successfully reverted to defaults")
                 onLog("[i] Most background services and power plans restored.")

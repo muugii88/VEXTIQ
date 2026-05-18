@@ -1,5 +1,6 @@
 package com.vextiq.optimizer
 
+import com.vextiq.core.SystemMonitor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -14,21 +15,53 @@ class Optimizer {
     private val gpuOptimizer = GpuOptimizer()
     private val networkOptimizer = NetworkOptimizer()
     private val cacheCleaner = CacheCleaner()
+    private val ramCleaner = RamCleaner()
     private val gameProfileOptimizer = GameProfileOptimizer()
     private val gameSpecificOptimizer = GameSpecificOptimizer()
     private val advancedBooster = AdvancedBooster()
     private val backupManager = BackupManager()
     private val vextiqBrain = VextiqBrain()
+    private val fpsPredictor = com.vextiq.brain.FPSPredictor()
+    private val mlOptimizer = com.vextiq.brain.MLOptimizer()
     
     /**
-     * Run Smart Boost - Full optimization for a specific game
+     * Run Smart Boost - Full optimization for a specific game.
+     * If [monitor] is provided and a game is running, records before/after FPS for delta.
      */
-    suspend fun runSmartBoost(gameId: String, gameName: String, playstyle: String, onLog: (String) -> Unit): Boolean {
+    suspend fun runSmartBoost(
+        gameId: String,
+        gameName: String,
+        playstyle: String,
+        onLog: (String) -> Unit,
+        monitor: SystemMonitor? = null
+    ): Boolean {
         return withContext(Dispatchers.IO) {
             onLog("[>>] Starting Smart Boost for $gameName")
             onLog("[i] Profile: HIGH BRANT")
             onLog("[i] Mode: ${playstyle.uppercase()}")
             onLog("")
+
+            val fpsBefore = monitor?.takeIf { it.stats.value.isGameRunning }?.stats?.value?.fps?.takeIf { it > 0 }
+            if (fpsBefore != null) {
+                onLog("[FPS] Baseline: $fpsBefore FPS (${monitor.stats.value.activeGame})")
+                onLog("")
+            }
+            
+            // Show FPS prediction before optimization
+            try {
+                val hw = com.vextiq.core.HardwareManager.getHardware()
+                if (hw.cpuName != "Unknown") {
+                    val prediction = fpsPredictor.getPrediction(
+                        config = mapOf("r_GraphicsQuality" to 2, "r_ShadowRes" to 2, "r_PostProcess" to 2),
+                        gpuVram = hw.gpuVramGB,
+                        cpuCores = hw.cpuCores,
+                        cpuFreqMhz = hw.cpuFreqMHz
+                    )
+                    onLog("[PREDICT] Expected ~${prediction.averageFps} FPS (1%: ~${prediction.fps1Percent})")
+                    onLog("[PREDICT] ${prediction.recommendation}")
+                    onLog("")
+                }
+            } catch (e: Exception) { /* Skip if hardware not detected */ }
             
             var success = 0
             val total = 8
@@ -126,6 +159,31 @@ class Optimizer {
             onLog("[OK] SMART BOOST COMPLETE!")
             onLog("[i] Success: $success/$total optimizations")
             onLog("[i] Restart $gameName for best results")
+
+            if (fpsBefore != null && monitor != null) {
+                delay(3000)
+                val fpsAfter = monitor.stats.value.fps
+                if (fpsAfter > 0) {
+                    val delta = fpsAfter - fpsBefore
+                    val sign = if (delta > 0) "+" else ""
+                    onLog("[FPS] Before: $fpsBefore → After: $fpsAfter (${sign}${delta} FPS)")
+                }
+            }
+            
+            // Record to ML history for future learning
+            try {
+                val brainResult = vextiqBrain.optimize(gameId, "performance", playstyle, onLog = {})
+                mlOptimizer.recordResult(
+                    gameId = gameId,
+                    gpuTier = brainResult.gpuTier,
+                    playstyle = playstyle,
+                    settings = brainResult.config.mapValues { (it.value as? Number)?.toInt() ?: 0 },
+                    resultFps = brainResult.estimatedFps
+                )
+                onLog("[ML] Optimization recorded for future learning")
+            } catch (e: Exception) {
+                // ML recording is optional
+            }
             
             success >= total / 2
         }
@@ -178,5 +236,66 @@ class Optimizer {
      */
     fun detectGpu(): GpuOptimizer.GpuInfo {
         return gpuOptimizer.detectGpu()
+    }
+    
+    /**
+     * Run ultimate boost - all optimizations at once
+     */
+    suspend fun runUltimateBoost(
+        onLog: (String) -> Unit,
+        monitor: SystemMonitor? = null
+    ) = withContext(Dispatchers.IO) {
+        onLog("[>>] Starting ULTIMATE BOOST...")
+        onLog("")
+
+        val fpsBefore = monitor?.takeIf { it.stats.value.isGameRunning }?.stats?.value?.fps?.takeIf { it > 0 }
+        if (fpsBefore != null) {
+            onLog("[FPS] Baseline: $fpsBefore FPS (${monitor.stats.value.activeGame})")
+            onLog("")
+        }
+
+        // Step 0: Backup (safety net)
+        onLog("[0/6] Creating backup...")
+        try {
+            backupManager.createBackup { }
+            onLog("[OK] Backup created — restore from Tools if needed")
+        } catch (e: Exception) {
+            onLog("[!] Backup skipped: ${e.message}")
+        }
+
+        // Windows optimizations
+        onLog("[1/6] Windows optimizations...")
+        windowsOptimizer.applyAll(onLog)
+
+        // GPU optimizations
+        onLog("[2/6] GPU optimizations...")
+        gpuOptimizer.autoOptimize(onLog)
+
+        // Network optimizations
+        onLog("[3/6] Network optimizations...")
+        networkOptimizer.applyAll(onLog)
+
+        // Cache cleanup
+        onLog("[4/6] Cache cleanup...")
+        cacheCleaner.cleanAll(onLog)
+
+        // RAM cleanup
+        onLog("[5/6] RAM optimization...")
+        ramCleaner.optimizeForGaming(onLog)
+        
+        onLog("")
+        onLog("═══════════════════════════════════════")
+        onLog("[OK] ULTIMATE BOOST COMPLETE!")
+        onLog("═══════════════════════════════════════")
+
+        if (fpsBefore != null && monitor != null) {
+            delay(3000)
+            val fpsAfter = monitor.stats.value.fps
+            if (fpsAfter > 0) {
+                val delta = fpsAfter - fpsBefore
+                val sign = if (delta > 0) "+" else ""
+                onLog("[FPS] Before: $fpsBefore → After: $fpsAfter (${sign}${delta} FPS)")
+            }
+        }
     }
 }

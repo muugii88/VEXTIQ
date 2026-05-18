@@ -96,46 +96,64 @@ object HardwareManager {
         // ═══════════════════════════════════════════════════════════════════════
         onLog("[>>] Detecting CPU...")
         try {
-            cpuName = PowerShellRunner.runPowerShell(
+            var process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_Processor).Name"
-            ).trimmedOutput()
+            )).redirectErrorStream(true).start()
+            cpuName = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
             if (cpuName.isNotEmpty() && cpuName != "null") {
                 onLog("[OK] CPU: $cpuName")
             }
-
-            cpuCores = PowerShellRunner.runPowerShell(
+            
+            // Cores
+            process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_Processor).NumberOfCores"
-            ).trimmedOutput().toIntOrNull() ?: 8
-
-            cpuThreads = PowerShellRunner.runPowerShell(
+            )).redirectErrorStream(true).start()
+            cpuCores = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 8
+            process.waitFor()
+            
+            // Threads
+            process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_Processor).NumberOfLogicalProcessors"
-            ).trimmedOutput().toIntOrNull() ?: 16
+            )).redirectErrorStream(true).start()
+            cpuThreads = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 16
+            process.waitFor()
             onLog("[OK] Cores: $cpuCores | Threads: $cpuThreads")
-
-            cpuFreq = PowerShellRunner.runPowerShell(
+            
+            // Frequency - Max of current and max
+            process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 """
                 ${'$'}cpu = Get-CimInstance Win32_Processor
                 ${'$'}current = ${'$'}cpu.CurrentClockSpeed
                 ${'$'}max = ${'$'}cpu.MaxClockSpeed
                 if (${'$'}current -gt ${'$'}max) { ${'$'}current } else { ${'$'}max }
                 """.trimIndent()
-            ).trimmedOutput().toIntOrNull() ?: 3600
+            )).redirectErrorStream(true).start()
+            cpuFreq = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 3600
+            process.waitFor()
             onLog("[OK] CPU Frequency: ${cpuFreq}MHz")
-
+            
         } catch (e: Exception) {
             onLog("[!] CPU detection error: ${e.message}")
         }
-
+        
         // ═══════════════════════════════════════════════════════════════════════
         // GPU DETECTION
         // ═══════════════════════════════════════════════════════════════════════
         onLog("")
         onLog("[>>] Detecting GPU...")
         try {
-            gpuName = PowerShellRunner.runPowerShell(
+            val process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "Get-CimInstance Win32_VideoController | Where-Object { \$_.Name -notlike '*Microsoft*' -and \$_.Name -notlike '*Basic*' } | Select-Object -First 1 -ExpandProperty Name"
-            ).trimmedOutput()
-
+            )).redirectErrorStream(true).start()
+            gpuName = process.inputStream.bufferedReader().readText().trim()
+            process.waitFor()
+            
             if (gpuName.isNotEmpty() && gpuName != "null") {
                 onLog("[OK] GPU: $gpuName")
                 
@@ -169,52 +187,70 @@ object HardwareManager {
         onLog("")
         onLog("[>>] Detecting RAM...")
         try {
-            ramGB = PowerShellRunner.runPowerShell(
+            var process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)"
-            ).trimmedOutput().toIntOrNull() ?: 16
+            )).redirectErrorStream(true).start()
+            ramGB = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 16
+            process.waitFor()
             onLog("[OK] RAM: ${ramGB}GB")
-
-            ramSpeed = PowerShellRunner.runPowerShell(
+            
+            // RAM Speed
+            process = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_PhysicalMemory | Select-Object -First 1).Speed"
-            ).trimmedOutput().toIntOrNull() ?: 3200
+            )).redirectErrorStream(true).start()
+            ramSpeed = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 3200
+            process.waitFor()
             onLog("[OK] RAM Speed: ${ramSpeed}MHz")
-
+            
         } catch (e: Exception) {
             onLog("[!] RAM detection error: ${e.message}")
         }
-
+        
         // ═══════════════════════════════════════════════════════════════════════
         // DISPLAY DETECTION - WMI (tested and works!)
         // ═══════════════════════════════════════════════════════════════════════
         onLog("")
         onLog("[>>] Detecting Display...")
         try {
-            resWidth = PowerShellRunner.runPowerShell(
+            // Separate simple queries - most reliable
+            val widthProcess = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_VideoController | Where-Object { \$_.Name -notlike '*Microsoft*' } | Select-Object -First 1).CurrentHorizontalResolution"
-            ).trimmedOutput().toIntOrNull() ?: 1920
-
-            resHeight = PowerShellRunner.runPowerShell(
+            )).redirectErrorStream(true).start()
+            resWidth = widthProcess.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 1920
+            widthProcess.waitFor()
+            
+            val heightProcess = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_VideoController | Where-Object { \$_.Name -notlike '*Microsoft*' } | Select-Object -First 1).CurrentVerticalResolution"
-            ).trimmedOutput().toIntOrNull() ?: 1080
-
-            refreshRate = PowerShellRunner.runPowerShell(
+            )).redirectErrorStream(true).start()
+            resHeight = heightProcess.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 1080
+            heightProcess.waitFor()
+            
+            val hzProcess = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_VideoController | Where-Object { \$_.Name -notlike '*Microsoft*' } | Select-Object -First 1).CurrentRefreshRate"
-            ).trimmedOutput().toIntOrNull() ?: 60
-
+            )).redirectErrorStream(true).start()
+            refreshRate = hzProcess.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 60
+            hzProcess.waitFor()
+            
             onLog("[OK] Resolution: ${resWidth}x${resHeight}")
             onLog("[OK] Refresh Rate: ${refreshRate}Hz")
-
+            
         } catch (e: Exception) {
             onLog("[!] Display detection error: ${e.message}")
         }
-
+        
         // ═══════════════════════════════════════════════════════════════════════
         // DISK DETECTION
         // ═══════════════════════════════════════════════════════════════════════
         onLog("")
         onLog("[>>] Detecting System Disk...")
         try {
-            val output = PowerShellRunner.runPowerShell(
+            val diskProcess = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 """
                 ${'$'}drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" | Get-CimAssociatedInstance -ResultClassName Win32_DiskPartition | Get-CimAssociatedInstance -ResultClassName Win32_DiskDrive
                 ${'$'}disk = Get-PhysicalDisk | Where-Object { ${'$'}_.DeviceNumber -eq ${'$'}drive.Index }
@@ -222,8 +258,11 @@ object HardwareManager {
                 ${'$'}isNVMe = ${'$'}disk.BusType -eq 'NVMe'
                 "${'$'}type|${'$'}isNVMe"
                 """.trimIndent()
-            ).trimmedOutput()
-
+            )).redirectErrorStream(true).start()
+            
+            val output = diskProcess.inputStream.bufferedReader().readText().trim()
+            diskProcess.waitFor()
+            
             if (output.contains("|")) {
                 val parts = output.split("|")
                 systemDiskType = parts[0]
@@ -273,21 +312,25 @@ object HardwareManager {
         // METHOD 1: NVIDIA - nvidia-smi (most accurate for NVIDIA)
         if (gpuVendor == "NVIDIA") {
             onLog("  [1] Trying nvidia-smi...")
-            val result = PowerShellRunner.exec(
-                listOf("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
-            )
-            val vram = result.trimmedOutput().toIntOrNull()
-            if (vram != null && vram > 1000) {
-                onLog("  [OK] nvidia-smi: ${vram}MB")
-                return vram
+            try {
+                val p = ProcessBuilder("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
+                    .redirectErrorStream(true).start()
+                val vram = p.inputStream.bufferedReader().readText().trim().toIntOrNull()
+                p.waitFor()
+                if (vram != null && vram > 1000) {
+                    onLog("  [OK] nvidia-smi: ${vram}MB")
+                    return vram
+                }
+            } catch (_: Exception) {
+                onLog("  [!] nvidia-smi not available")
             }
-            onLog("  [!] nvidia-smi not available")
         }
-
+        
         // METHOD 2: Registry qwMemorySize (64-bit, works for AMD >4GB)
         onLog("  [2] Trying Registry qwMemorySize...")
         try {
-            val vram = PowerShellRunner.runPowerShell(
+            val p = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 """
                 ${'$'}paths = @(
                     'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0000',
@@ -310,7 +353,9 @@ object HardwareManager {
                 }
                 0
                 """.trimIndent()
-            ).trimmedOutput().toIntOrNull()
+            )).redirectErrorStream(true).start()
+            val vram = p.inputStream.bufferedReader().readText().trim().toIntOrNull()
+            p.waitFor()
             if (vram != null && vram > 1000) {
                 onLog("  [OK] Registry qwMemorySize: ${vram}MB")
                 return vram
@@ -320,18 +365,21 @@ object HardwareManager {
         } catch (e: Exception) {
             onLog("  [!] Registry error: ${e.message}")
         }
-
+        
         // METHOD 3: WMI AdapterRAM (may overflow for >4GB)
         onLog("  [3] Trying WMI AdapterRAM...")
         try {
-            val vram = PowerShellRunner.runPowerShell(
+            val p = ProcessBuilder(listOf(
+                "powershell", "-NoProfile", "-Command",
                 """
                 ${'$'}gpu = Get-CimInstance Win32_VideoController | Where-Object { ${'$'}_.Name -notlike '*Microsoft*' } | Select-Object -First 1
                 if (${'$'}gpu.AdapterRAM) {
                     [math]::Round(${'$'}gpu.AdapterRAM / 1MB)
                 } else { 0 }
                 """.trimIndent()
-            ).trimmedOutput().toIntOrNull()
+            )).redirectErrorStream(true).start()
+            val vram = p.inputStream.bufferedReader().readText().trim().toIntOrNull()
+            p.waitFor()
             if (vram != null && vram > 1000) {
                 onLog("  [OK] WMI AdapterRAM: ${vram}MB")
                 // Check for overflow (4GB max in 32-bit)

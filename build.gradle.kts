@@ -36,7 +36,15 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "com.vextiq.MainKt"
-        
+
+        // Pin where JVM writes hs_err_pid*.log on a fatal crash. Default is the
+        // launcher's CWD which on a Program Files install is unwriteable for
+        // non-admin sessions, so crash logs vanished. Send them next to app.log
+        // in the user profile where they always survive.
+        jvmArgs += listOf(
+            "-XX:ErrorFile=\${user.home}/.vextiq/hs_err_pid%p.log"
+        )
+
         nativeDistributions {
             // MSI + EXE installers - both Windows Installer formats with upgrade support
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
@@ -48,6 +56,10 @@ compose.desktop {
             windows {
                 console = false
                 dirChooser = true
+                // System-wide install in Program Files. Main.kt self-elevates on
+                // launch via UAC, so the OneDrive-Desktop shortcut workaround
+                // isn't needed — running as admin means we can also write a
+                // user-Desktop shortcut at first launch if one is missing.
                 perUserInstall = false
                 menu = true
                 menuGroup = "VEXTIQ"

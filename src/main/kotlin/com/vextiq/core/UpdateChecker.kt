@@ -9,7 +9,7 @@ import javax.net.ssl.HttpsURLConnection
 class UpdateChecker {
     
     companion object {
-        const val CURRENT_VERSION = "11.0.0"
+        const val CURRENT_VERSION = "2.0.0"
         const val VERSION_CHECK_URL = "https://api.github.com/repos/vextiq/vextiq-pro/releases/latest"
     }
     
@@ -34,7 +34,7 @@ class UpdateChecker {
             // Simulate checking
             Thread.sleep(500)
             
-            val latestVersion = "11.0.0" // Would come from API
+            val latestVersion = "2.0.0" // Would come from API
             val updateAvailable = compareVersions(latestVersion, CURRENT_VERSION) > 0
             
             if (updateAvailable) {

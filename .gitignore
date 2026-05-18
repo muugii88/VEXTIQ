@@ -17,8 +17,14 @@ kotlin-js-store/
 # Local/Binary/Build Output
 *.log
 *.zip
+*.err
+hs_err_pid*
 VEXTIQ_Scan.zip
 scripts/test-output/
+
+# Tooling / per-developer
+.claude/
+HANDOFF.md
 
 # Resources / Binaries (can be downloaded by build script)
 src/main/resources/PresentMon.exe

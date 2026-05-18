@@ -185,4 +185,11 @@ class BackupManager {
         
         onLog("[OK] Deleted $deleted old backups")
     }
+    
+    /**
+     * Restore backup (no parameter version - uses latest)
+     */
+    fun restoreBackup(onLog: (String) -> Unit): Boolean {
+        return restoreLatest(onLog)
+    }
 }

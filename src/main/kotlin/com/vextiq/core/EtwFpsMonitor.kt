@@ -53,6 +53,13 @@ class EtwFpsMonitor {
     private val frameCountByPid = ConcurrentHashMap<Int, Int>()
     @Volatile private var lastSampleNs = 0L
 
+    // Skip our own process so Compose Desktop's DXGI Present events don't
+    // get picked as a "game" by GameDetection (they would otherwise drive
+    // NetworkMonitor.setActiveGame and trigger region probing for the host app).
+    private val selfPid: Int = try {
+        ProcessHandle.current().pid().toInt()
+    } catch (_: Throwable) { -1 }
+
     companion object {
         private const val SESSION_NAME = "VEXTIQ-FPS-Session"
         private const val EVENT_TRACE_REAL_TIME_MODE = 0x00000100
@@ -189,6 +196,7 @@ class EtwFpsMonitor {
         logfile.EventRecordCallback = EventRecordCallback { record ->
             try {
                 val pid = record?.EventHeader?.ProcessId ?: return@EventRecordCallback
+                if (pid == selfPid) return@EventRecordCallback
                 // Event ID filter — DXGI Present is ID 42, but collecting anything
                 // from the DXGI provider still yields per-process frame counts
                 // (PresentStart + PresentStop are the common frame events).
@@ -223,33 +231,47 @@ class EtwFpsMonitor {
         lastSampleNs = now
         if (elapsedNs <= 0) return
 
-        val top = frameCountByPid.entries
-            .filter { it.value > 0 }
-            .maxByOrNull { it.value } ?: run {
-                frameCountByPid.clear()
-                return
-            }
+        // Resolve process names for every PID with frames, then apply the
+        // shared game-detection filter. Without this step, Discord or Chrome
+        // overlay frames would happily win the "max frame count" race.
+        val snapshot = frameCountByPid.toMap()
+        frameCountByPid.clear()
 
-        val pid = top.key
-        val frames = top.value
+        if (snapshot.isEmpty()) return
+
+        val nameToCount = HashMap<String, Int>(snapshot.size)
+        for ((pid, count) in snapshot) {
+            val name = resolveProcessName(pid)
+            if (name.isEmpty()) continue
+            nameToCount.merge(name, count) { a, b -> a + b }
+        }
+
+        val winner = GameDetection.pickActiveGame(nameToCount, minFramesForUnknown = 30)
+        if (winner.isEmpty()) return
+
+        val frames = nameToCount[winner] ?: return
         val seconds = elapsedNs / 1_000_000_000.0
         val fps = if (seconds > 0) (frames / seconds).toInt() else 0
         val frametime = if (fps > 0) 1000.0 / fps else 0.0
-        val processName = resolveProcessName(pid)
 
         _stats.value = _stats.value.copy(
             fps = fps,
             frametime = frametime,
-            processName = processName,
+            processName = winner,
             isRunning = true,
             available = true
         )
-
-        frameCountByPid.clear()
     }
 
+    // PID → process-name cache. Each lookup spawns a PowerShell process, so
+    // re-resolving the same PID every second blows up CPU/IO. PIDs are recycled
+    // when the OS reuses them, but a stale name for a now-dead PID is harmless
+    // here — we only use it for display.
+    private val pidNameCache = ConcurrentHashMap<Int, String>()
+
     private fun resolveProcessName(pid: Int): String {
-        return try {
+        pidNameCache[pid]?.let { return it }
+        val name = try {
             val out = PowerShellRunner.runPowerShell(
                 "(Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName",
                 timeoutSec = 3
@@ -258,6 +280,14 @@ class EtwFpsMonitor {
         } catch (_: Exception) {
             "PID-$pid"
         }
+        pidNameCache[pid] = name
+        // Cap cache size — without bounding this, a long-running session could
+        // accumulate thousands of dead PIDs.
+        if (pidNameCache.size > 256) {
+            val iterator = pidNameCache.keys.iterator()
+            repeat(64) { if (iterator.hasNext()) { iterator.next(); iterator.remove() } }
+        }
+        return name
     }
 
     // ─── JNA types ──────────────────────────────────────────────────────────
@@ -345,8 +375,23 @@ class EtwFpsMonitor {
         @JvmField var LogFileName = CharArray(NAME_BUFFER)
     }
 
+    /**
+     * EVENT_TRACE_LOGFILEW layout for 64-bit Windows.
+     *
+     * The first version of this struct declared CurrentEvent and LogfileHeader
+     * as `Pointer?` (8 bytes each). They are actually INLINE structs of size
+     * ~96 (EVENT_TRACE) and ~280 (TRACE_LOGFILE_HEADER) bytes. That mismatch
+     * placed EventRecordCallback at offset 68 instead of ~432 — when admin
+     * unblocked StartTraceW, OpenTraceW read a garbage function pointer at
+     * offset 432 and ProcessTrace dispatched into it: EXCEPTION_ACCESS_VIOLATION.
+     *
+     * We don't read those inline structs from Java, so they're modeled here as
+     * opaque ByteArray placeholders sized to match the real struct. That keeps
+     * the offsets of the fields we DO read/write (BufferCallback,
+     * EventRecordCallback, Context) at the byte positions Windows expects.
+     */
     @Structure.FieldOrder("LogFileName", "LoggerName", "CurrentTime", "BuffersRead",
-        "ProcessTraceMode", "CurrentEvent", "LogfileHeader", "BufferCallback",
+        "ProcessTraceMode", "CurrentEventPad", "LogfileHeaderPad", "BufferCallback",
         "BufferSize", "Filled", "EventsLost", "EventRecordCallback", "IsKernelTrace", "Context")
     open class EventTraceLogfile : Structure() {
         @JvmField var LogFileName: WString? = null
@@ -354,8 +399,8 @@ class EtwFpsMonitor {
         @JvmField var CurrentTime: Long = 0
         @JvmField var BuffersRead: Int = 0
         @JvmField var ProcessTraceMode: Int = 0
-        @JvmField var CurrentEvent: Pointer? = null
-        @JvmField var LogfileHeader: Pointer? = null
+        @JvmField var CurrentEventPad: ByteArray = ByteArray(EVENT_TRACE_SIZE)
+        @JvmField var LogfileHeaderPad: ByteArray = ByteArray(TRACE_LOGFILE_HEADER_SIZE)
         @JvmField var BufferCallback: Pointer? = null
         @JvmField var BufferSize: Int = 0
         @JvmField var Filled: Int = 0
@@ -363,6 +408,22 @@ class EtwFpsMonitor {
         @JvmField var EventRecordCallback: EventRecordCallback? = null
         @JvmField var IsKernelTrace: Int = 0
         @JvmField var Context: Pointer? = null
+
+        companion object {
+            // sizeof(EVENT_TRACE) on x64: EVENT_TRACE_HEADER (56) + InstanceId (4)
+            //   + ParentInstanceId (4) + ParentGuid (16) + MofData ptr (8) +
+            //   MofLength (4) + ClientContext/BufferContext union (4) = 96
+            const val EVENT_TRACE_SIZE = 96
+
+            // sizeof(TRACE_LOGFILE_HEADER) on x64: BufferSize (4) + Version (4)
+            //   + ProviderVersion (4) + NumberOfProcessors (4) + EndTime (8) +
+            //   TimerResolution (4) + MaximumFileSize (4) + LogFileMode (4) +
+            //   BuffersWritten (4) + LogInstanceGuid union (16) + LoggerName ptr (8)
+            //   + LogFileName ptr (8) + TIME_ZONE_INFORMATION (172) + BootTime (8)
+            //   + PerfFreq (8) + StartTime (8) + ReservedFlags (4) + BuffersLost (4)
+            //   = 276, rounded up to 8-byte alignment = 280
+            const val TRACE_LOGFILE_HEADER_SIZE = 280
+        }
     }
 
     interface Advapi32Ext : StdCallLibrary {

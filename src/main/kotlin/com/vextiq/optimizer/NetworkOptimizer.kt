@@ -171,4 +171,11 @@ class NetworkOptimizer {
         process.waitFor()
         return output
     }
+    
+    /**
+     * General optimize - alias for applyAll
+     */
+    fun optimize(onLog: (String) -> Unit) {
+        applyAll(onLog)
+    }
 }

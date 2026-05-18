@@ -50,19 +50,9 @@ class WindowsOptimizer {
      * Disable Fullscreen Optimizations globally
      */
     fun disableFullscreenOptimizations(onLog: (String) -> Unit): OptResult {
-        onLog("[>>] Disabling Fullscreen Optimizations...")
-        
-        return try {
-            runReg("add", "HKCU\\System\\GameConfigStore", "/v", "GameDVR_FSEBehaviorMode", "/t", "REG_DWORD", "/d", "2", "/f")
-            runReg("add", "HKCU\\System\\GameConfigStore", "/v", "GameDVR_HonorUserFSEBehaviorMode", "/t", "REG_DWORD", "/d", "1", "/f")
-            runReg("add", "HKCU\\System\\GameConfigStore", "/v", "GameDVR_FSEBehavior", "/t", "REG_DWORD", "/d", "2", "/f")
-            
-            onLog("[OK] Fullscreen Optimizations disabled")
-            OptResult(true, "FSO disabled")
-        } catch (e: Exception) {
-            onLog("[!] FSO: ${e.message}")
-            OptResult(false, e.message ?: "Failed")
-        }
+        // Delegated to AdvancedBooster — same registry writes lived in both classes.
+        val ok = advancedBooster.disableFullscreenOptimizations(onLog)
+        return OptResult(ok, if (ok) "FSO disabled" else "Failed")
     }
     
     /**
@@ -87,21 +77,9 @@ class WindowsOptimizer {
      * Optimize Visual Effects for Performance
      */
     fun optimizeVisualEffects(onLog: (String) -> Unit): OptResult {
-        onLog("[>>] Optimizing Visual Effects...")
-        
-        return try {
-            // Set to "Adjust for best performance" with some exceptions
-            runReg("add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects", "/v", "VisualFXSetting", "/t", "REG_DWORD", "/d", "2", "/f")
-            
-            // Keep smooth fonts
-            runReg("add", "HKCU\\Control Panel\\Desktop", "/v", "FontSmoothing", "/t", "REG_SZ", "/d", "2", "/f")
-            
-            onLog("[OK] Visual effects optimized")
-            OptResult(true, "Visual effects optimized")
-        } catch (e: Exception) {
-            onLog("[!] Visual effects: ${e.message}")
-            OptResult(false, e.message ?: "Failed")
-        }
+        // Delegated to AdvancedBooster — same registry writes lived in both classes.
+        val ok = advancedBooster.optimizeVisualEffects(onLog)
+        return OptResult(ok, if (ok) "Visual effects optimized" else "Failed")
     }
     
     /**
@@ -211,5 +189,108 @@ class WindowsOptimizer {
         }
         
         return output
+    }
+    
+    // ─── Delegated to AdvancedBooster ───
+    // These three implementations duplicate AdvancedBooster's richer versions.
+    // To stay DRY we delegate; the API is unchanged so the Tools page is untouched.
+    private val advancedBooster by lazy { AdvancedBooster() }
+
+    fun setTimerResolution(onLog: (String) -> Unit) {
+        advancedBooster.setTimerResolution(onLog)
+    }
+
+    fun disableCoreParking(onLog: (String) -> Unit) {
+        advancedBooster.disableCoreParking(onLog)
+    }
+
+    fun setUltimatePowerPlan(onLog: (String) -> Unit) {
+        advancedBooster.setUltimatePowerPlan(onLog)
+    }
+    
+    /**
+     * Optimize mouse settings
+     */
+    fun optimizeMouse(onLog: (String) -> Unit) {
+        onLog("[>>] Optimizing mouse settings...")
+        try {
+            // Disable mouse acceleration
+            runReg("add", "HKCU\\Control Panel\\Mouse", "/v", "MouseSpeed", "/t", "REG_SZ", "/d", "0", "/f")
+            runReg("add", "HKCU\\Control Panel\\Mouse", "/v", "MouseThreshold1", "/t", "REG_SZ", "/d", "0", "/f")
+            runReg("add", "HKCU\\Control Panel\\Mouse", "/v", "MouseThreshold2", "/t", "REG_SZ", "/d", "0", "/f")
+            onLog("[OK] Mouse acceleration disabled!")
+        } catch (e: Exception) {
+            onLog("[!] Mouse optimization failed: ${e.message}")
+        }
+    }
+    
+    /**
+     * Disable Windows Telemetry
+     */
+    fun disableTelemetry(onLog: (String) -> Unit): OptResult {
+        onLog("[>>] Disabling Windows Telemetry...")
+        return try {
+            runReg("add", "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection", "/v", "AllowTelemetry", "/t", "REG_DWORD", "/d", "0", "/f")
+            runReg("add", "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection", "/v", "AllowTelemetry", "/t", "REG_DWORD", "/d", "0", "/f")
+            runCmd("sc", "config", "DiagTrack", "start=", "disabled")
+            runCmd("sc", "stop", "DiagTrack")
+            onLog("[OK] Telemetry disabled!")
+            OptResult(true, "Telemetry disabled")
+        } catch (e: Exception) {
+            onLog("[!] Telemetry disable failed: ${e.message}")
+            OptResult(false, e.message ?: "Failed")
+        }
+    }
+    
+    /**
+     * Optimize pagefile for gaming
+     */
+    fun optimizePagefile(onLog: (String) -> Unit): OptResult {
+        onLog("[>>] Optimizing Pagefile for gaming...")
+        return try {
+            // Get total RAM
+            val totalRam = Runtime.getRuntime().maxMemory() / (1024 * 1024 * 1024)
+            val pagefileSize = if (totalRam >= 32) 16384 else if (totalRam >= 16) 8192 else 4096
+            
+            onLog("[i] Recommended pagefile: ${pagefileSize}MB")
+            onLog("[i] Note: Manual pagefile configuration recommended")
+            onLog("[i] System Properties > Advanced > Performance > Virtual Memory")
+            onLog("[OK] Pagefile optimization info provided")
+            OptResult(true, "Pagefile info provided")
+        } catch (e: Exception) {
+            onLog("[!] Pagefile check failed: ${e.message}")
+            OptResult(false, e.message ?: "Failed")
+        }
+    }
+    
+    /**
+     * Repair Windows with DISM and SFC
+     */
+    fun repairWindows(onLog: (String) -> Unit): OptResult {
+        onLog("[>>] Starting Windows repair...")
+        onLog("[i] This may take several minutes...")
+        return try {
+            onLog("[1/2] Running DISM...")
+            val dismResult = runCmd("DISM", "/Online", "/Cleanup-Image", "/RestoreHealth")
+            if (dismResult.contains("successfully")) {
+                onLog("[OK] DISM completed successfully")
+            } else {
+                onLog("[i] DISM completed")
+            }
+            
+            onLog("[2/2] Running SFC...")
+            val sfcResult = runCmd("sfc", "/scannow")
+            if (sfcResult.contains("did not find any integrity violations")) {
+                onLog("[OK] No integrity violations found")
+            } else {
+                onLog("[i] SFC scan completed")
+            }
+            
+            onLog("[OK] Windows repair completed!")
+            OptResult(true, "Repair completed")
+        } catch (e: Exception) {
+            onLog("[!] Repair failed: ${e.message}")
+            OptResult(false, e.message ?: "Failed")
+        }
     }
 }

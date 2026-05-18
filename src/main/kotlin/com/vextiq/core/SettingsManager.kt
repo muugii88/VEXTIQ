@@ -4,44 +4,61 @@ import java.io.File
 import java.util.Properties
 
 /**
- * Settings Manager - Persist user preferences
+ * Settings Manager — persists user preferences.
+ *
+ * Note: `properties` lives in the companion object so every `SettingsManager()`
+ * call shares the same in-memory state. Previously each call created its own
+ * isolated cache, so a toggle change in the Settings page was invisible to the
+ * Main window's close handler (which had loaded its own stale copy at startup).
  */
 class SettingsManager {
-    
-    private val settingsDir = File(System.getProperty("user.home"), ".vextiq")
-    private val settingsFile = File(settingsDir, "settings.properties")
-    private val properties = Properties()
-    
-    init {
-        settingsDir.mkdirs()
-        load()
-    }
-    
-    /**
-     * Load settings from file
-     */
-    fun load() {
-        try {
-            if (settingsFile.exists()) {
-                settingsFile.inputStream().use { properties.load(it) }
+
+    companion object {
+        private val settingsDir = File(System.getProperty("user.home"), ".vextiq").also { it.mkdirs() }
+        private val settingsFile = File(settingsDir, "settings.properties")
+        internal val properties: Properties = Properties().also { props ->
+            try {
+                if (settingsFile.exists()) settingsFile.inputStream().use { props.load(it) }
+            } catch (_: Exception) { /* defaults */ }
+        }
+
+        /**
+         * Last error from saveAll(). Cleared on success. UI can subscribe by
+         * polling this in a Composable. Empty string = healthy.
+         */
+        @Volatile var lastSaveError: String = ""
+            private set
+
+        private val saveListeners = mutableListOf<(String) -> Unit>()
+
+        /** Subscribe to save-failures. Listener is called with a non-empty error message. */
+        fun onSaveError(listener: (String) -> Unit) { saveListeners.add(listener) }
+
+        @JvmStatic
+        @Synchronized
+        internal fun saveAll() {
+            try {
+                settingsFile.outputStream().use { properties.store(it, "VEXTIQ PRO Settings") }
+                if (lastSaveError.isNotEmpty()) lastSaveError = ""
+            } catch (e: Exception) {
+                lastSaveError = "Settings save failed: ${e.message ?: e.javaClass.simpleName}"
+                System.err.println("[SettingsManager] $lastSaveError")
+                saveListeners.forEach { runCatching { it(lastSaveError) } }
             }
-        } catch (e: Exception) {
-            System.err.println("[SettingsManager] Failed to load ${settingsFile.absolutePath}: ${e.message} — using defaults")
+        }
+
+        @JvmStatic
+        @Synchronized
+        internal fun reload() {
+            try {
+                properties.clear()
+                if (settingsFile.exists()) settingsFile.inputStream().use { properties.load(it) }
+            } catch (_: Exception) { /* defaults */ }
         }
     }
 
-    /**
-     * Save settings to file
-     */
-    fun save() {
-        try {
-            settingsFile.outputStream().use {
-                properties.store(it, "VEXTIQ PRO Settings")
-            }
-        } catch (e: Exception) {
-            System.err.println("[SettingsManager] Failed to save ${settingsFile.absolutePath}: ${e.message}")
-        }
-    }
+    fun load() = reload()
+    fun save() = saveAll()
     
     // Language
     var language: String
@@ -88,6 +105,18 @@ class SettingsManager {
             properties.setProperty("lastGame", value)
             save()
         }
+
+    /**
+     * Last playstyle chosen for a given game (per-game memory).
+     * Defaults to "none" if never set.
+     */
+    fun getLastPlaystyle(gameId: String): String =
+        properties.getProperty("lastPlaystyle.$gameId", "none")
+
+    fun setLastPlaystyle(gameId: String, playstyle: String) {
+        properties.setProperty("lastPlaystyle.$gameId", playstyle)
+        save()
+    }
     
     // Minimize to tray
     var minimizeToTray: Boolean
@@ -145,30 +174,22 @@ class SettingsManager {
     var overlayShowFrametime: Boolean
         get() = properties.getProperty("overlayShowFrametime", "true").toBoolean()
         set(value) { properties.setProperty("overlayShowFrametime", value.toString()); save() }
+    
+    // Optimization behavior
+    var restoreOnExit: Boolean
+        get() = properties.getProperty("restoreOnExit", "false").toBoolean()
+        set(value) { properties.setProperty("restoreOnExit", value.toString()); save() }
+    
+    var backupBeforeChanges: Boolean
+        get() = properties.getProperty("backupBeforeChanges", "true").toBoolean()
+        set(value) { properties.setProperty("backupBeforeChanges", value.toString()); save() }
 
-    // --- Network overlay extras ---
-    var overlayShowWifiBaseline: Boolean
-        get() = properties.getProperty("overlayShowWifiBaseline", "false").toBoolean()
-        set(value) { properties.setProperty("overlayShowWifiBaseline", value.toString()); save() }
+    // Adaptive system tuning: throttle background apps when stutter detected
+    var adaptiveTuningEnabled: Boolean
+        get() = properties.getProperty("adaptiveTuningEnabled", "true").toBoolean()
+        set(value) { properties.setProperty("adaptiveTuningEnabled", value.toString()); save() }
 
-    var overlayShowPacketLoss: Boolean
-        get() = properties.getProperty("overlayShowPacketLoss", "false").toBoolean()
-        set(value) { properties.setProperty("overlayShowPacketLoss", value.toString()); save() }
-
-    var overlayShowJitter: Boolean
-        get() = properties.getProperty("overlayShowJitter", "false").toBoolean()
-        set(value) { properties.setProperty("overlayShowJitter", value.toString()); save() }
-
-    var overlayShowRegion: Boolean
-        get() = properties.getProperty("overlayShowRegion", "true").toBoolean()
-        set(value) { properties.setProperty("overlayShowRegion", value.toString()); save() }
-
-    // "fps" (default) or "network" — overlay mode
-    var overlayMode: String
-        get() = properties.getProperty("overlayMode", "fps")
-        set(value) { properties.setProperty("overlayMode", value); save() }
-
-    // --- Core monitoring toggles ---
+    // Network probing
     var gameServerPingEnabled: Boolean
         get() = properties.getProperty("gameServerPingEnabled", "true").toBoolean()
         set(value) { properties.setProperty("gameServerPingEnabled", value.toString()); save() }
@@ -176,12 +197,93 @@ class SettingsManager {
     var regionalProbingEnabled: Boolean
         get() = properties.getProperty("regionalProbingEnabled", "true").toBoolean()
         set(value) { properties.setProperty("regionalProbingEnabled", value.toString()); save() }
-
-    var etwFpsEnabled: Boolean
-        get() = properties.getProperty("etwFpsEnabled", "true").toBoolean()
-        set(value) { properties.setProperty("etwFpsEnabled", value.toString()); save() }
-
-    var rawIcmpEnabled: Boolean
-        get() = properties.getProperty("rawIcmpEnabled", "true").toBoolean()
-        set(value) { properties.setProperty("rawIcmpEnabled", value.toString()); save() }
+    
+    /**
+     * Set/remove Windows autostart registry entry
+     */
+    fun applyStartWithWindows(enabled: Boolean) {
+        try {
+            val appPath = java.io.File(
+                System.getProperty("java.class.path").split(";").firstOrNull() ?: return
+            ).absolutePath
+            
+            if (enabled) {
+                ProcessBuilder(listOf(
+                    "reg", "add", 
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "/v", "VEXTIQ", "/t", "REG_SZ", "/d", "\"$appPath\"", "/f"
+                )).redirectErrorStream(true).start().waitFor()
+                println("[Settings] Added VEXTIQ to Windows startup")
+            } else {
+                ProcessBuilder(listOf(
+                    "reg", "delete",
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "/v", "VEXTIQ", "/f"
+                )).redirectErrorStream(true).start().waitFor()
+                println("[Settings] Removed VEXTIQ from Windows startup")
+            }
+        } catch (e: Exception) {
+            println("[Settings] Autostart error: ${e.message}")
+        }
+    }
+    
+    /**
+     * Reset all settings to defaults
+     */
+    fun resetAll() {
+        properties.clear()
+        save()
+        load()
+        // Remove autostart entry
+        applyStartWithWindows(false)
+        println("[Settings] All settings reset to defaults")
+    }
+    
+    /**
+     * Clear ML/optimization cache
+     */
+    fun clearOptimizationCache(): Int {
+        var cleared = 0
+        try {
+            val mlFile = java.io.File(settingsDir, "ml_history.properties")
+            if (mlFile.exists()) { mlFile.delete(); cleared++ }
+            
+            val cacheDir = java.io.File(settingsDir, "cache")
+            if (cacheDir.exists()) { 
+                cacheDir.listFiles()?.forEach { it.delete(); cleared++ }
+            }
+        } catch (e: Exception) {
+            println("[Settings] Cache clear error: ${e.message}")
+        }
+        return cleared
+    }
+    
+    /**
+     * Export settings + logs to file on Desktop
+     */
+    fun exportLogs(): String? {
+        return try {
+            val desktop = java.io.File(System.getProperty("user.home"), "Desktop")
+            val exportFile = java.io.File(desktop, "vextiq_export_${System.currentTimeMillis()}.txt")
+            
+            val sb = StringBuilder()
+            sb.appendLine("═══ VEXTIQ PRO v2.0 Settings Export ═══")
+            sb.appendLine("Date: ${java.time.LocalDateTime.now()}")
+            sb.appendLine()
+            sb.appendLine("═══ Settings ═══")
+            properties.forEach { key, value -> sb.appendLine("$key = $value") }
+            sb.appendLine()
+            sb.appendLine("═══ System Info ═══")
+            sb.appendLine("OS: ${System.getProperty("os.name")} ${System.getProperty("os.version")}")
+            sb.appendLine("Java: ${System.getProperty("java.version")}")
+            sb.appendLine("Cores: ${Runtime.getRuntime().availableProcessors()}")
+            sb.appendLine("RAM: ${Runtime.getRuntime().maxMemory() / (1024*1024)}MB")
+            
+            exportFile.writeText(sb.toString())
+            exportFile.absolutePath
+        } catch (e: Exception) {
+            println("[Settings] Export error: ${e.message}")
+            null
+        }
+    }
 }
