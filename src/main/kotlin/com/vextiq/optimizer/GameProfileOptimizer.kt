@@ -70,13 +70,14 @@ class GameProfileOptimizer {
             onLog("[OK] Created optimized USER.cfg")
         } catch (e: Exception) {
             onLog("[!] Cannot write USER.cfg: ${e.message}")
+            return false
         }
-        
+
         // Clean shaders
         val shadersDir = File(scDir, "USER\\Client\\0\\shaders")
         if (shadersDir.exists()) {
-            shadersDir.deleteRecursively()
-            onLog("[OK] Cleaned shader cache")
+            if (shadersDir.deleteRecursively()) onLog("[OK] Cleaned shader cache")
+            else onLog("[!] Shader cache partly in use — close the game first")
         }
         
         onLog("[OK] Star Citizen optimization complete")
@@ -128,8 +129,9 @@ class GameProfileOptimizer {
             onLog("[OK] Created optimized profile")
         } catch (e: Exception) {
             onLog("[!] Cannot write config: ${e.message}")
+            return false
         }
-        
+
         onLog("[OK] $gameVersion optimization complete")
         return true
     }
@@ -166,8 +168,9 @@ class GameProfileOptimizer {
             onLog("[OK] Created optimized settings")
         } catch (e: Exception) {
             onLog("[!] Cannot write settings: ${e.message}")
+            return false
         }
-        
+
         onLog("[OK] Cyberpunk 2077 optimization complete")
         return true
     }
@@ -179,35 +182,33 @@ class GameProfileOptimizer {
         onLog("[>>] Optimizing $gameName...")
         
         // Generic competitive FPS optimizations
-        // Set process priority to High via registry
-        try {
+        // Set process priority to High via registry (IFEO — needs admin)
+        return try {
             val exeName = when (gameName.lowercase()) {
                 "cs2" -> "cs2.exe"
                 "valorant" -> "VALORANT-Win64-Shipping.exe"
                 else -> "$gameName.exe"
             }
-            
-            runCommand(listOf(
-                "reg", "add",
-                "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\$exeName\\PerfOptions",
-                "/v", "CpuPriorityClass", "/t", "REG_DWORD", "/d", "3", "/f"
-            ))
-            onLog("[OK] Process priority: High")
-            
-            runCommand(listOf(
-                "reg", "add",
-                "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\$exeName\\PerfOptions",
-                "/v", "IoPriority", "/t", "REG_DWORD", "/d", "3", "/f"
-            ))
-            onLog("[OK] I/O priority: High")
-            
+            val perfPath =
+                "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\$exeName\\PerfOptions"
+
+            val cpu = runCommand(listOf("reg", "add", perfPath, "/v", "CpuPriorityClass", "/t", "REG_DWORD", "/d", "3", "/f"))
+            if (cpu.ok) onLog("[OK] Process priority: High") else onLog("[!] Process priority failed (needs admin)")
+
+            val io = runCommand(listOf("reg", "add", perfPath, "/v", "IoPriority", "/t", "REG_DWORD", "/d", "3", "/f"))
+            if (io.ok) onLog("[OK] I/O priority: High") else onLog("[!] I/O priority failed (needs admin)")
+
+            if (cpu.ok && io.ok) {
+                onLog("[OK] $gameName optimization complete")
+                true
+            } else {
+                onLog("[!] $gameName optimization incomplete — run as admin")
+                false
+            }
         } catch (e: Exception) {
             onLog("[!] Priority settings (needs admin): ${e.message}")
+            false
         }
-        
-        // Disable fullscreen optimization for this game
-        onLog("[OK] $gameName optimization complete")
-        return true
     }
     
     /**
@@ -228,13 +229,17 @@ class GameProfileOptimizer {
         }
     }
     
-    private fun runCommand(cmd: List<String>): String {
+    private data class CmdResult(val exitCode: Int, val output: String) {
+        val ok: Boolean get() = exitCode == 0
+    }
+
+    private fun runCommand(cmd: List<String>): CmdResult {
         val process = ProcessBuilder(cmd)
             .redirectErrorStream(true)
             .start()
-        
-        val output = process.inputStream.bufferedReader().readText()
-        process.waitFor()
-        return output
+
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val exit = process.waitFor()
+        return CmdResult(exit, output)
     }
 }

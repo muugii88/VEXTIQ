@@ -215,8 +215,8 @@ class GameSpecificOptimizer {
                 // Shader cache cleanup
                 val shaderCache = File("$userHome\\AppData\\Local\\Star Citizen")
                 if (shaderCache.exists()) {
-                    shaderCache.deleteRecursively()
-                    onLog("[OK] Shader cache cleared")
+                    if (shaderCache.deleteRecursively()) onLog("[OK] Shader cache cleared")
+                    else onLog("[!] Shader cache partly in use — close the game first")
                 }
                 checkPagefile(onLog)
             } catch (e: Exception) {
@@ -267,14 +267,21 @@ class GameSpecificOptimizer {
         val result = vextiqBrain.optimize("cyberpunk_2077", "performance", playstyle) { msg -> onLog(msg) }
         
         val cp77Path = gamePaths.getPath("cyberpunk_2077")
-        if (cp77Path != null) {
-            val configPath = File(cp77Path, "engine\\config\\platform\\pc")
-            configPath.mkdirs()
-            File(configPath, "user.ini").writeText(result.configString)
-            onLog("[OK] user.ini updated with ${playstyle.uppercase()} brain")
-            checkReBAR(onLog)
+        if (cp77Path != null && File(cp77Path).exists()) {
+            try {
+                val configPath = File(cp77Path, "engine\\config\\platform\\pc")
+                if (!configPath.exists() && !configPath.mkdirs()) {
+                    onLog("[!] Could not create config dir: ${configPath.absolutePath}")
+                    return
+                }
+                File(configPath, "user.ini").writeText(result.configString)
+                onLog("[OK] user.ini updated with ${playstyle.uppercase()} brain")
+                checkReBAR(onLog)
+            } catch (e: Exception) {
+                onLog("[!] Cyberpunk config write failed: ${e.message}")
+            }
         } else {
-            onLog("[i] Cyberpunk 2077 path not set. Skipping .ini creation.")
+            onLog("[i] Cyberpunk 2077 path not set or missing. Skipping .ini creation.")
         }
     }
     
@@ -498,14 +505,22 @@ class GameSpecificOptimizer {
      */
     fun setGamePriority(processName: String, onLog: (String) -> Unit) {
         try {
+            // Escape single quotes so a crafted process name can't break out of the
+            // wmic filter. wmic is also absent on newer Win11 builds — handled below.
+            val safeName = processName.replace("'", "")
             val process = ProcessBuilder(listOf(
-                "wmic", "process", "where", "name='$processName'",
+                "wmic", "process", "where", "name='$safeName'",
                 "call", "setpriority", "128"
             )).redirectErrorStream(true).start()
-            
-            process.waitFor()
-            onLog("[OK] $processName priority: High")
-            
+
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val exit = process.waitFor()
+            // wmic prints "ReturnValue = 0;" on a successful priority change.
+            if (exit == 0 && output.contains("ReturnValue = 0")) {
+                onLog("[OK] $processName priority: High")
+            } else {
+                onLog("[!] Could not set $processName priority (not running or wmic unavailable)")
+            }
         } catch (e: Exception) {
             onLog("[i] Could not set priority")
         }

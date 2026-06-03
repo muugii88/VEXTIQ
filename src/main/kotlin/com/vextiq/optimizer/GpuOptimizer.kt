@@ -55,22 +55,30 @@ class GpuOptimizer {
         onLog("[>>] Applying NVIDIA optimizations...")
         
         try {
-            // 1. Set Persistence Mode (keeps driver loaded, lowers latency)
+            // 1. Set Persistence Mode (keeps driver loaded, lowers latency).
+            // Often "Not Supported" on consumer GeForce cards, so this is best-effort
+            // and never the success criterion.
             val pmResult = runCommand(listOf("nvidia-smi", "-pm", "1"))
-            if (pmResult.contains("Enabled", ignoreCase = true)) {
+            if (pmResult.output.contains("Enabled", ignoreCase = true)) {
                 onLog("[OK] NVIDIA Persistence Mode: Enabled")
             }
-            
-            // 2. Set Performance Mode (Max Clocks) - note: requires admin
-            runCommand(listOf("nvidia-smi", "-pl", "MAX")) // Max Power Limit
-            
-            // 3. Registry Fallbacks (Legacy)
-            runReg("add", "HKCU\\Software\\NVIDIA Corporation\\Global\\NVTweak", "/v", "PowerMizer", "/t", "REG_DWORD", "/d", "1", "/f")
-            onLog("[OK] Power mode: Maximum Performance (Registry)")
-            
-            onLog("[OK] NVIDIA optimizations complete")
-            onLog("[i] Recommended: Use 'NVIDIA Profile Inspector' for deeper tweaks")
-            return true
+
+            // NOTE: the old code ran `nvidia-smi -pl MAX` here. `-pl` takes a numeric
+            // power limit in watts — "MAX" is rejected as invalid, so the call always
+            // errored and did nothing. Power-limit tuning needs a card-specific watt
+            // value, so it's dropped rather than faked.
+
+            // 2. Registry Power mode (Maximum Performance) — HKCU, reliable.
+            val reg = runReg("add", "HKCU\\Software\\NVIDIA Corporation\\Global\\NVTweak", "/v", "PowerMizer", "/t", "REG_DWORD", "/d", "1", "/f")
+            if (reg.ok) {
+                onLog("[OK] Power mode: Maximum Performance (Registry)")
+                onLog("[OK] NVIDIA optimizations complete")
+                onLog("[i] Recommended: Use 'NVIDIA Profile Inspector' for deeper tweaks")
+                return true
+            } else {
+                onLog("[!] NVIDIA registry write failed")
+                return false
+            }
         } catch (e: Exception) {
             onLog("[!] NVIDIA optimization error: ${e.message}")
             return false
@@ -100,16 +108,22 @@ class GpuOptimizer {
                 "TF_TextureFilteringQuality" to 1
             )
             
+            var ok = true
             for ((key, value) in tweaks) {
-                runReg("add", amdRegPath, "/v", key, "/t", if (key.contains("Quality")) "REG_SZ" else "REG_DWORD", "/d", value.toString(), "/f")
+                val r = runReg("add", amdRegPath, "/v", key, "/t", if (key.contains("Quality")) "REG_SZ" else "REG_DWORD", "/d", value.toString(), "/f")
+                if (!r.ok) ok = false
             }
-            
-            onLog("[OK] AMD Anti-Lag & Boost: Enabled")
-            onLog("[OK] AMD Stutter-Free: Enabled")
-            onLog("[OK] AMD Texture Filtering: Performance")
-            
-            onLog("[OK] AMD optimizations complete")
-            return true
+
+            if (ok) {
+                onLog("[OK] AMD Anti-Lag & Boost: Enabled")
+                onLog("[OK] AMD Stutter-Free: Enabled")
+                onLog("[OK] AMD Texture Filtering: Performance")
+                onLog("[OK] AMD optimizations complete")
+                return true
+            } else {
+                onLog("[!] AMD optimization: some registry writes failed")
+                return false
+            }
         } catch (e: Exception) {
             onLog("[!] AMD optimization error: ${e.message}")
             return false
@@ -141,33 +155,36 @@ class GpuOptimizer {
         onLog("[>>] Applying generic GPU optimizations...")
         
         try {
-            // Hardware-accelerated GPU scheduling
-            runReg("add", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers", "/v", "HwSchMode", "/t", "REG_DWORD", "/d", "2", "/f")
-            onLog("[OK] Hardware-accelerated GPU scheduling: Enabled")
-            
-            // Disable GPU power saving
-            runReg("add", "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences", "/v", "DirectXUserGlobalSettings", "/t", "REG_SZ", "/d", "VRROptimizeEnable=0;SwapEffectUpgradeEnable=1;", "/f")
-            onLog("[OK] DirectX settings optimized")
-            
-            return true
+            // Hardware-accelerated GPU scheduling (HKLM — needs admin + reboot)
+            val hags = runReg("add", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers", "/v", "HwSchMode", "/t", "REG_DWORD", "/d", "2", "/f")
+            if (hags.ok) onLog("[OK] Hardware-accelerated GPU scheduling: Enabled (reboot to apply)")
+            else onLog("[!] HAGS failed (needs admin)")
+
+            // DirectX preferences (HKCU)
+            val dx = runReg("add", "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences", "/v", "DirectXUserGlobalSettings", "/t", "REG_SZ", "/d", "VRROptimizeEnable=0;SwapEffectUpgradeEnable=1;", "/f")
+            if (dx.ok) onLog("[OK] DirectX settings optimized")
+            else onLog("[!] DirectX settings failed")
+
+            return hags.ok && dx.ok
         } catch (e: Exception) {
             onLog("[!] Generic optimization error: ${e.message}")
             return false
         }
     }
     
-    private fun runReg(vararg args: String): String {
-        val cmd = listOf("reg") + args.toList()
-        return runCommand(cmd)
+    private data class CmdResult(val exitCode: Int, val output: String) {
+        val ok: Boolean get() = exitCode == 0
     }
-    
-    private fun runCommand(cmd: List<String>): String {
+
+    private fun runReg(vararg args: String): CmdResult = runCommand(listOf("reg") + args.toList())
+
+    private fun runCommand(cmd: List<String>): CmdResult {
         val process = ProcessBuilder(cmd)
             .redirectErrorStream(true)
             .start()
-        
-        val output = process.inputStream.bufferedReader().readText()
-        process.waitFor()
-        return output
+
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val exit = process.waitFor()
+        return CmdResult(exit, output)
     }
 }
