@@ -305,8 +305,7 @@ class SystemMonitor {
                     val output = process.inputStream.bufferedReader().use { it.readText() }
                     process.waitFor()
                     
-                    val match = "(\\d+)\\s*(ms|мс|мил|мсек)".toRegex(RegexOption.IGNORE_CASE).find(output)
-                    val latency = match?.groupValues?.get(1)?.toIntOrNull()
+                    val latency = PingParse.parseLatencyMs(output)
                     if (latency != null && latency > 0) return latency
                 } catch (e: Exception) { /* skip */ }
             }
