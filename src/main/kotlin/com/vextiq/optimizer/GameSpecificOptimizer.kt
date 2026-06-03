@@ -309,7 +309,7 @@ class GameSpecificOptimizer {
         }
 
         try {
-            val backup = File(iniFile.parentFile, "GameUserSettings.ini.vextiq.bak")
+            val backup = File(iniFile.parentFile, ConfigBackup.backupNameFor("GameUserSettings.ini"))
             if (!backup.exists()) iniFile.copyTo(backup)
             val patched = patchIniKeys(
                 iniFile.readText(),
@@ -717,7 +717,7 @@ class GameSpecificOptimizer {
             }
             val file = File(dir, fileName)
             if (file.exists()) {
-                val backup = File(dir, "$fileName.vextiq.bak")
+                val backup = File(dir, ConfigBackup.backupNameFor(fileName))
                 if (!backup.exists()) {
                     file.copyTo(backup)
                     onLog("[i] Backed up original $fileName -> ${backup.name}")
@@ -748,6 +748,37 @@ class GameSpecificOptimizer {
             }
         }
         return out
+    }
+
+    /**
+     * Undo All (game side): restore every game config VEXTIQ overwrote from its
+     * `.vextiq.bak` backup, across all the locations the writers touch. Returns
+     * the number of files restored.
+     */
+    fun restoreGameConfigs(onLog: (String) -> Unit): Int {
+        onLog("[>>] Restoring game configs from VEXTIQ backups...")
+        val dirs = mutableListOf(
+            File(localAppData, "FortniteGame\\Saved\\Config\\WindowsClient"),
+            File("$documentsPath\\Rockstar Games\\GTA V")
+        )
+        File(localAppData, "VALORANT\\Saved\\Config").listFiles()
+            ?.filter { it.isDirectory }
+            ?.forEach { dirs += File(it, "Windows") }
+        listOf("star_citizen", "battlefield_6", "battlefield_2042").forEach { id ->
+            gamePaths.getPath(id)?.let { dirs += File(it) }
+        }
+        gamePaths.getPath("cyberpunk_2077")?.let { dirs += File(it, "engine\\config\\platform\\pc") }
+
+        var total = 0
+        for (dir in dirs.distinct()) {
+            ConfigBackup.restoreAll(dir).forEach { name ->
+                onLog("[OK] Restored $name (${dir.absolutePath})")
+                total++
+            }
+        }
+        if (total == 0) onLog("[i] No VEXTIQ game-config backups found to restore")
+        else onLog("[OK] Restored $total game config file(s)")
+        return total
     }
 
     /**
