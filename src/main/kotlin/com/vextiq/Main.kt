@@ -18,7 +18,9 @@ import androidx.compose.ui.window.*
 import com.vextiq.core.*
 import com.vextiq.optimizer.*
 import com.vextiq.ui.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class Page { DASHBOARD, GAMEBOOST, TOOLS, VPN, TROUBLESHOOT, SETTINGS }
 
@@ -148,6 +150,13 @@ fun App(
     val settings = remember { SettingsManager() }
     val stats by monitor.stats.collectAsState()
     val netStats by monitor.networkStats.collectAsState()
+
+    // Admin status drives the dashboard warning banner. Detected once off the UI
+    // thread (it spawns a PowerShell check) so startup isn't blocked.
+    var isAdmin by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        isAdmin = withContext(Dispatchers.IO) { AdminCheck.isAdmin }
+    }
 
     var currentPage by remember { mutableStateOf(Page.DASHBOARD) }
     var selectedGame by remember {
@@ -324,9 +333,10 @@ fun App(
                                     else -> logs = logs + ("[i] Action: $action" to "")
                                 }
                             }
-                        }
+                        },
+                        isAdmin = isAdmin
                     )
-                    
+
                     Page.GAMEBOOST -> GameBoostPage(
                         games = Games.list,
                         selectedGame = selectedGame,
@@ -415,6 +425,7 @@ fun App(
                                     "SC_Memory" -> WindowsOptimizer().optimizePagefile(logMsg)
                                     "Backup" -> BackupManager().createBackup(logMsg)
                                     "Restore" -> BackupManager().restoreBackup(logMsg)
+                                    "UndoAll" -> optimizer.undoAll(logMsg)
                                     "Repair" -> WindowsOptimizer().repairWindows(logMsg)
                                     else -> toolsLogs = toolsLogs + ("[i] Action: $action" to "")
                                 }

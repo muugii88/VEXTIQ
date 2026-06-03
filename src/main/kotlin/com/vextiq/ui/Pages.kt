@@ -34,7 +34,8 @@ fun DashboardPage(
     onHardwareScan: () -> Unit,
     onQuickAction: (String) -> Unit,
     onCancel: () -> Unit = {},
-    netStats: NetworkMonitor.NetStats? = null
+    netStats: NetworkMonitor.NetStats? = null,
+    isAdmin: Boolean = true
 ) {
     Row(
         modifier = Modifier.fillMaxSize(),
@@ -45,6 +46,24 @@ fun DashboardPage(
             modifier = Modifier.weight(0.65f).fillMaxHeight().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // ── Admin warning: without admin, HKLM/registry/power tweaks silently fail ──
+            if (!isAdmin) {
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .background(VextiqColors.Error.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                        .border(1.dp, VextiqColors.Error.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "⚠  Not running as Administrator — many optimizations (registry, power plan, services) won't take effect. Restart VEXTIQ as admin.",
+                        color = VextiqColors.Error,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
             // ── Stat Cards Row ──
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DashStatCard("CPU LOAD", "${stats.cpuUsage}", "%", VextiqColors.Primary, Modifier.weight(1f))
@@ -668,6 +687,9 @@ fun ToolsPage(
                 ToolActionCard("Backup", "Save current system configuration.", Modifier.weight(1f)) { onAction("Backup") }
                 ToolActionCard("Restore", "Revert to saved backup state.", Modifier.weight(1f)) { onAction("Restore") }
                 ToolActionCard("Repair Windows", "Run DISM and SFC integrity check.", Modifier.weight(1f)) { onAction("Repair") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolActionCard("Undo All", "Revert every VEXTIQ change: registry, services, power, network and game configs.", Modifier.weight(1f)) { onAction("UndoAll") }
             }
         }
         
