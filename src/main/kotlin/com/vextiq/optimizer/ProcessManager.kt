@@ -20,6 +20,14 @@ class ProcessManager {
 
     private fun baseName(name: String) = name.removeSuffix(".exe").removeSuffix(".EXE")
 
+    /**
+     * Escape a value for safe embedding inside a single-quoted PowerShell string.
+     * In PowerShell a literal single quote is written by doubling it (' -> ''),
+     * which prevents a crafted process name from breaking out of the quotes and
+     * injecting arbitrary commands.
+     */
+    private fun psSingleQuote(value: String) = value.replace("'", "''")
+
     fun setHighPriority(processName: String, onLog: (String) -> Unit): Boolean {
         onLog("[>>] Setting $processName to High priority...")
         return setPriority(processName, "High", onLog)
@@ -34,7 +42,7 @@ class ProcessManager {
 
     private fun setPriority(processName: String, priorityClass: String, onLog: (String) -> Unit): Boolean {
         val script = """
-            ${'$'}targets = Get-Process -Name '${baseName(processName)}' -ErrorAction SilentlyContinue
+            ${'$'}targets = Get-Process -Name '${psSingleQuote(baseName(processName))}' -ErrorAction SilentlyContinue
             if (-not ${'$'}targets) { Write-Output 'NOT_FOUND'; exit 0 }
             ${'$'}count = 0
             foreach (${'$'}p in ${'$'}targets) {
@@ -68,7 +76,7 @@ class ProcessManager {
     fun setPerformanceCoreAffinity(processName: String, onLog: (String) -> Unit): Boolean {
         onLog("[>>] Setting $processName to P-cores only...")
         val script = """
-            ${'$'}targets = Get-Process -Name '${baseName(processName)}' -ErrorAction SilentlyContinue
+            ${'$'}targets = Get-Process -Name '${psSingleQuote(baseName(processName))}' -ErrorAction SilentlyContinue
             if (-not ${'$'}targets) { Write-Output 'NOT_FOUND'; exit 0 }
             ${'$'}count = 0
             foreach (${'$'}p in ${'$'}targets) {

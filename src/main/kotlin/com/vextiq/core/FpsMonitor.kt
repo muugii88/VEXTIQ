@@ -3,14 +3,12 @@ package com.vextiq.core
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 
 /**
  * VEXTIQ FPS Monitor
  * 
- * Method 1: PresentMon (most accurate) - bundled in resources or auto-downloaded
+ * Method 1: PresentMon (most accurate) - bundled in resources, extracted on first use
  * Method 2: GPU Performance Counters (fallback)
  */
 class FpsMonitor {
@@ -316,41 +314,6 @@ class FpsMonitor {
             Pair(fps, processName)
         } catch (e: Exception) {
             Pair(0, "Unknown")
-        }
-    }
-    
-    /**
-     * Download PresentMon automatically
-     */
-    private fun downloadPresentMon(): Boolean {
-        return try {
-            val url = "https://github.com/GameTechDev/PresentMon/releases/download/v1.10.0/PresentMon-1.10.0-x64.exe"
-            println("[FPS] Downloading PresentMon from GitHub...")
-
-            val process = ProcessBuilder(listOf(
-                "powershell", "-NoProfile", "-Command",
-                "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; " +
-                "Invoke-WebRequest -Uri '$url' -OutFile '${presentMonExe.absolutePath}' -UseBasicParsing"
-            )).redirectErrorStream(true).start()
-
-            val output = process.inputStream.bufferedReader().readText()
-            val exit = process.waitFor()
-            val ok = exit == 0 && presentMonExe.exists() && presentMonExe.length() > 100_000
-
-            if (ok) {
-                println("[FPS] PresentMon downloaded successfully (${presentMonExe.length() / 1024}KB)")
-            } else {
-                System.err.println(
-                    "[FPS] PresentMon download FAILED (exit=$exit). " +
-                    "Likely cause: no internet, firewall, or GitHub blocked. " +
-                    "FPS will use GPU-counter fallback (less accurate)."
-                )
-                if (output.isNotBlank()) System.err.println("[FPS]   PowerShell output: ${output.take(300)}")
-            }
-            ok
-        } catch (e: Exception) {
-            System.err.println("[FPS] PresentMon download threw: ${e.message}. Using fallback.")
-            false
         }
     }
     

@@ -46,11 +46,17 @@ private fun ensureUserDesktopShortcutAsync() {
 
             val link = java.io.File(desktop, "VEXTIQ PRO.lnk")
             if (link.exists()) return@Thread
+            // Escape paths for single-quoted PowerShell strings (' -> '') so a
+            // username/path containing a quote can't break out and inject commands.
+            fun ps(value: String) = value.replace("'", "''")
+            val linkPath = ps(link.absolutePath)
+            val targetPath = ps(appPath)
+            val workingDir = ps(java.io.File(appPath).parent ?: "")
             val createProc = ProcessBuilder(
                 "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                "\$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${link.absolutePath}'); " +
-                    "\$s.TargetPath='$appPath'; \$s.WorkingDirectory='${java.io.File(appPath).parent}'; " +
-                    "\$s.IconLocation='$appPath'; \$s.Description='VEXTIQ PRO'; \$s.Save()"
+                "\$s=(New-Object -ComObject WScript.Shell).CreateShortcut('$linkPath'); " +
+                    "\$s.TargetPath='$targetPath'; \$s.WorkingDirectory='$workingDir'; " +
+                    "\$s.IconLocation='$targetPath'; \$s.Description='VEXTIQ PRO'; \$s.Save()"
             ).start()
             createProc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
         } catch (_: Throwable) { /* best-effort */ }
