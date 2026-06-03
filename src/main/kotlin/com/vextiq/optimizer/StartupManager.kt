@@ -49,7 +49,7 @@ class StartupManager {
                 "reg", "query", regPath
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             
             // Parse output

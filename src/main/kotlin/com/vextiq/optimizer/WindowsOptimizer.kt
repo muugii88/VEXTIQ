@@ -182,7 +182,7 @@ class WindowsOptimizer {
             .redirectErrorStream(true)
             .start()
         
-        val output = process.inputStream.bufferedReader().readText()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
         val exitCode = process.waitFor()
         
         if (exitCode != 0) {

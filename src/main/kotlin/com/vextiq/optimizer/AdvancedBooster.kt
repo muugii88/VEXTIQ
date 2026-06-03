@@ -154,7 +154,7 @@ class AdvancedBooster {
                 "Get-MMAgent | Select-Object -ExpandProperty MemoryCompression"
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.equals("True", ignoreCase = true)) {
@@ -203,7 +203,7 @@ class AdvancedBooster {
                 "powershell", "-NoProfile", "-Command", script
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             
             if (output.contains("OK:")) {
@@ -564,7 +564,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output == "OK") {
@@ -607,7 +607,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -691,7 +691,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -739,7 +739,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -785,7 +785,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -812,7 +812,7 @@ class AdvancedBooster {
             val fallbackScript = "Get-Process | ForEach-Object { try { [Runtime.InteropServices.Marshal]::SetProcessWorkingSetSize(${'$'}_.Handle, -1, -1) } catch {} }; Write-Output 'OK'"
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", fallbackScript)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -949,7 +949,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {

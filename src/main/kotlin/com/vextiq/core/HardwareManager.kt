@@ -100,7 +100,7 @@ object HardwareManager {
                 "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_Processor).Name"
             )).redirectErrorStream(true).start()
-            cpuName = process.inputStream.bufferedReader().readText().trim()
+            cpuName = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             if (cpuName.isNotEmpty() && cpuName != "null") {
                 onLog("[OK] CPU: $cpuName")
@@ -111,7 +111,7 @@ object HardwareManager {
                 "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_Processor).NumberOfCores"
             )).redirectErrorStream(true).start()
-            cpuCores = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 8
+            cpuCores = process.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull() ?: 8
             process.waitFor()
             
             // Threads
@@ -119,7 +119,7 @@ object HardwareManager {
                 "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_Processor).NumberOfLogicalProcessors"
             )).redirectErrorStream(true).start()
-            cpuThreads = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 16
+            cpuThreads = process.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull() ?: 16
             process.waitFor()
             onLog("[OK] Cores: $cpuCores | Threads: $cpuThreads")
             
@@ -133,7 +133,7 @@ object HardwareManager {
                 if (${'$'}current -gt ${'$'}max) { ${'$'}current } else { ${'$'}max }
                 """.trimIndent()
             )).redirectErrorStream(true).start()
-            cpuFreq = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 3600
+            cpuFreq = process.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull() ?: 3600
             process.waitFor()
             onLog("[OK] CPU Frequency: ${cpuFreq}MHz")
             
@@ -151,7 +151,7 @@ object HardwareManager {
                 "powershell", "-NoProfile", "-Command",
                 "Get-CimInstance Win32_VideoController | Where-Object { \$_.Name -notlike '*Microsoft*' -and \$_.Name -notlike '*Basic*' } | Select-Object -First 1 -ExpandProperty Name"
             )).redirectErrorStream(true).start()
-            gpuName = process.inputStream.bufferedReader().readText().trim()
+            gpuName = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (gpuName.isNotEmpty() && gpuName != "null") {
@@ -191,7 +191,7 @@ object HardwareManager {
                 "powershell", "-NoProfile", "-Command",
                 "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)"
             )).redirectErrorStream(true).start()
-            ramGB = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 16
+            ramGB = process.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull() ?: 16
             process.waitFor()
             onLog("[OK] RAM: ${ramGB}GB")
             
@@ -200,7 +200,7 @@ object HardwareManager {
                 "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_PhysicalMemory | Select-Object -First 1).Speed"
             )).redirectErrorStream(true).start()
-            ramSpeed = process.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 3200
+            ramSpeed = process.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull() ?: 3200
             process.waitFor()
             onLog("[OK] RAM Speed: ${ramSpeed}MHz")
             
@@ -219,21 +219,21 @@ object HardwareManager {
                 "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_VideoController | Where-Object { \$_.Name -notlike '*Microsoft*' } | Select-Object -First 1).CurrentHorizontalResolution"
             )).redirectErrorStream(true).start()
-            resWidth = widthProcess.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 1920
+            resWidth = widthProcess.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull() ?: 1920
             widthProcess.waitFor()
             
             val heightProcess = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_VideoController | Where-Object { \$_.Name -notlike '*Microsoft*' } | Select-Object -First 1).CurrentVerticalResolution"
             )).redirectErrorStream(true).start()
-            resHeight = heightProcess.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 1080
+            resHeight = heightProcess.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull() ?: 1080
             heightProcess.waitFor()
             
             val hzProcess = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command",
                 "(Get-CimInstance Win32_VideoController | Where-Object { \$_.Name -notlike '*Microsoft*' } | Select-Object -First 1).CurrentRefreshRate"
             )).redirectErrorStream(true).start()
-            refreshRate = hzProcess.inputStream.bufferedReader().readText().trim().toIntOrNull() ?: 60
+            refreshRate = hzProcess.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull() ?: 60
             hzProcess.waitFor()
             
             onLog("[OK] Resolution: ${resWidth}x${resHeight}")
@@ -260,7 +260,7 @@ object HardwareManager {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = diskProcess.inputStream.bufferedReader().readText().trim()
+            val output = diskProcess.inputStream.bufferedReader().use { it.readText() }.trim()
             diskProcess.waitFor()
             
             if (output.contains("|")) {
@@ -315,7 +315,7 @@ object HardwareManager {
             try {
                 val p = ProcessBuilder("nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits")
                     .redirectErrorStream(true).start()
-                val vram = p.inputStream.bufferedReader().readText().trim().toIntOrNull()
+                val vram = p.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull()
                 p.waitFor()
                 if (vram != null && vram > 1000) {
                     onLog("  [OK] nvidia-smi: ${vram}MB")
@@ -354,7 +354,7 @@ object HardwareManager {
                 0
                 """.trimIndent()
             )).redirectErrorStream(true).start()
-            val vram = p.inputStream.bufferedReader().readText().trim().toIntOrNull()
+            val vram = p.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull()
             p.waitFor()
             if (vram != null && vram > 1000) {
                 onLog("  [OK] Registry qwMemorySize: ${vram}MB")
@@ -378,7 +378,7 @@ object HardwareManager {
                 } else { 0 }
                 """.trimIndent()
             )).redirectErrorStream(true).start()
-            val vram = p.inputStream.bufferedReader().readText().trim().toIntOrNull()
+            val vram = p.inputStream.bufferedReader().use { it.readText() }.trim().toIntOrNull()
             p.waitFor()
             if (vram != null && vram > 1000) {
                 onLog("  [OK] WMI AdapterRAM: ${vram}MB")

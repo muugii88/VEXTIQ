@@ -13,7 +13,7 @@ class ProcessManager {
         val proc = ProcessBuilder(
             listOf("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
         ).redirectErrorStream(true).start()
-        val output = proc.inputStream.bufferedReader().readText()
+        val output = proc.inputStream.bufferedReader().use { it.readText() }
         val exit = proc.waitFor()
         return exit to output
     }

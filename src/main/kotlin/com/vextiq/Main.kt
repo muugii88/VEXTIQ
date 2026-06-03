@@ -41,7 +41,7 @@ private fun ensureUserDesktopShortcutAsync() {
             ).redirectErrorStream(true).start()
             val finished = getDesktopProc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
             if (!finished) { getDesktopProc.destroyForcibly(); return@Thread }
-            val desktopPath = getDesktopProc.inputStream.bufferedReader().readText().trim()
+            val desktopPath = getDesktopProc.inputStream.bufferedReader().use { it.readText() }.trim()
             val desktop = java.io.File(desktopPath).takeIf { it.exists() && it.isDirectory } ?: return@Thread
 
             val link = java.io.File(desktop, "VEXTIQ PRO.lnk")

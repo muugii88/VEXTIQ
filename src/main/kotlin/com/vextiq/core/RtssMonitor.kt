@@ -64,7 +64,7 @@ class RtssMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("RTSS_RUNNING")) {
@@ -87,7 +87,7 @@ class RtssMonitor {
                 "tasklist", "/FI", "IMAGENAME eq RTSS.exe"
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             
             output.contains("RTSS.exe")
@@ -105,7 +105,7 @@ class RtssMonitor {
                 "tasklist", "/FI", "IMAGENAME eq MSIAfterburner.exe"
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             
             output.contains("MSIAfterburner.exe")

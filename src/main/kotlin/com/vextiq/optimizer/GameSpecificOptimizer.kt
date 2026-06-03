@@ -439,7 +439,7 @@ class GameSpecificOptimizer {
                 "(Get-CimInstance Win32_PageFileSetting).InitialSize"
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             val pagefileMB = output.toIntOrNull() ?: 0
@@ -467,7 +467,7 @@ class GameSpecificOptimizer {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("ReBAR_POSSIBLE")) {
@@ -542,7 +542,7 @@ class GameSpecificOptimizer {
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script))
                 .redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             
             if (output.contains("OK")) {

@@ -295,7 +295,7 @@ class SystemMonitor {
                     val process = ProcessBuilder(listOf(
                         "ping", "-n", "1", "-w", "500", server
                     )).redirectErrorStream(true).start()
-                    val output = process.inputStream.bufferedReader().readText()
+                    val output = process.inputStream.bufferedReader().use { it.readText() }
                     process.waitFor()
                     
                     val match = "(\\d+)\\s*(ms|мс|мил|мсек)".toRegex(RegexOption.IGNORE_CASE).find(output)
@@ -391,7 +391,7 @@ class SystemMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             output.toIntOrNull() ?: 0
         } catch (e: Exception) { 0 }
@@ -438,7 +438,7 @@ class SystemMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             output.toIntOrNull() ?: 0
         } catch (e: Exception) { 0 }
@@ -451,7 +451,7 @@ class SystemMonitor {
                     val process = ProcessBuilder(listOf(
                         "nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"
                     )).redirectErrorStream(true).start()
-                    val output = process.inputStream.bufferedReader().readText().trim()
+                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
                     if (process.waitFor() == 0) output.toIntOrNull() ?: 0 else 0
                 }
                 "AMD" -> {
@@ -466,7 +466,7 @@ class SystemMonitor {
                         } catch { 0 }
                         """.trimIndent()
                     )).redirectErrorStream(true).start()
-                    val output = process.inputStream.bufferedReader().readText().trim()
+                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
                     process.waitFor()
                     output.toIntOrNull()?.coerceIn(0, 120) ?: 0
                 }

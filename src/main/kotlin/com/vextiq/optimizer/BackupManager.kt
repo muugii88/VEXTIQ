@@ -126,7 +126,7 @@ class BackupManager {
                 .redirectErrorStream(true)
                 .start()
             
-            val output = result.inputStream.bufferedReader().readText()
+            val output = result.inputStream.bufferedReader().use { it.readText() }
             val exitCode = result.waitFor()
             
             if (exitCode == 0) {

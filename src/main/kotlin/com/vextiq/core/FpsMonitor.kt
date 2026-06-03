@@ -236,34 +236,6 @@ class FpsMonitor {
     }
     
     /**
-     * Try to read FPS from RTSS shared memory
-     */
-    private fun tryRtssMemory(): Int {
-        return try {
-            val process = ProcessBuilder(listOf(
-                "powershell", "-NoProfile", "-Command",
-                """
-                try {
-                    ${'$'}rtss = Get-Process "RTSS" -ErrorAction SilentlyContinue
-                    if (${'$'}rtss) {
-                        # RTSS is running, try to get FPS from OSD
-                        ${'$'}counter = (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples |
-                            Where-Object { ${'$'}_.CookedValue -gt 5 } | Measure-Object -Property CookedValue -Sum
-                        if (${'$'}counter.Sum -gt 10) {
-                            [math]::Round(60 * (${'$'}counter.Sum / 50))
-                        } else { 0 }
-                    } else { 0 }
-                } catch { 0 }
-                """.trimIndent()
-            )).redirectErrorStream(true).start()
-            
-            val output = process.inputStream.bufferedReader().readText().trim()
-            process.waitFor()
-            output.toIntOrNull() ?: 0
-        } catch (e: Exception) { 0 }
-    }
-    
-    /**
      * Get FPS estimate from DirectX present statistics
      */
     private fun getDirectXFps(): Int {
@@ -282,7 +254,7 @@ class FpsMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             output.toIntOrNull() ?: 0
         } catch (e: Exception) { 0 }
@@ -299,7 +271,7 @@ class FpsMonitor {
                 "powershell", "-NoProfile", "-Command",
                 "\$p = Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 -and \$_.ProcessName -notmatch '$ignoreRegex' } | Sort-Object CPU -Descending | Select-Object -First 1; if (\$p) { \$p.ProcessName } else { (Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName }"
             )).redirectErrorStream(true).start()
-            val processName = nameProcess.inputStream.bufferedReader().readText().trim().ifEmpty { "Unknown" }
+            val processName = nameProcess.inputStream.bufferedReader().use { it.readText() }.trim().ifEmpty { "Unknown" }
             nameProcess.waitFor()
             
             // Get GPU 3D usage
@@ -312,7 +284,7 @@ class FpsMonitor {
                 } catch { 0 }"""
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             val fps = output.toIntOrNull() ?: 0
             
