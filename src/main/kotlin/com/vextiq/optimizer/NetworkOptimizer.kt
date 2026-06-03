@@ -52,7 +52,7 @@ class NetworkOptimizer {
             var failures = 0
 
             // Helper: run a step, log [OK]/[!] based on the real exit code.
-            fun step(label: String, r: CmdResult) {
+            fun step(label: String, r: ProcessRunner.Result) {
                 if (r.ok) onLog("[OK] $label")
                 else { onLog("[!] $label — failed (run as admin)"); failures++ }
             }
@@ -89,7 +89,7 @@ class NetworkOptimizer {
         return try {
             val mmPath = "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile"
             var failures = 0
-            fun step(label: String, r: CmdResult) {
+            fun step(label: String, r: ProcessRunner.Result) {
                 if (r.ok) onLog("[OK] $label")
                 else { onLog("[!] $label — failed (run as admin)"); failures++ }
             }
@@ -124,7 +124,7 @@ class NetworkOptimizer {
         
         return try {
             var failures = 0
-            fun step(label: String, r: CmdResult) {
+            fun step(label: String, r: ProcessRunner.Result) {
                 if (r.ok) onLog("[OK] $label")
                 else { onLog("[!] $label — failed (run as admin)"); failures++ }
             }
@@ -167,7 +167,7 @@ class NetworkOptimizer {
     
     private fun findNetworkInterfaces(): List<String> {
         return try {
-            val result = runCommand(listOf("reg", "query", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces"))
+            val result = ProcessRunner.reg("query", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces")
             result.output.lines()
                 .filter { it.contains("HKEY_LOCAL_MACHINE") }
                 .map { it.substringAfterLast("\\") }
@@ -177,24 +177,9 @@ class NetworkOptimizer {
         }
     }
 
-    /** Result of an external command: process exit code + combined output. */
-    private data class CmdResult(val exitCode: Int, val output: String) {
-        val ok: Boolean get() = exitCode == 0
-    }
+    private fun runReg(vararg args: String) = ProcessRunner.reg(*args)
 
-    private fun runReg(vararg args: String): CmdResult = runCommand(listOf("reg") + args.toList())
-
-    private fun runCmd(vararg args: String): CmdResult = runCommand(args.toList())
-
-    private fun runCommand(cmd: List<String>): CmdResult {
-        val process = ProcessBuilder(cmd)
-            .redirectErrorStream(true)
-            .start()
-
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        val exit = process.waitFor()
-        return CmdResult(exit, output)
-    }
+    private fun runCmd(vararg args: String) = ProcessRunner.run(*args)
     
     /**
      * General optimize - alias for applyAll

@@ -229,17 +229,5 @@ class GameProfileOptimizer {
         }
     }
     
-    private data class CmdResult(val exitCode: Int, val output: String) {
-        val ok: Boolean get() = exitCode == 0
-    }
-
-    private fun runCommand(cmd: List<String>): CmdResult {
-        val process = ProcessBuilder(cmd)
-            .redirectErrorStream(true)
-            .start()
-
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        val exit = process.waitFor()
-        return CmdResult(exit, output)
-    }
+    private fun runCommand(cmd: List<String>) = ProcessRunner.run(cmd)
 }
