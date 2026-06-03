@@ -19,7 +19,10 @@ class FpsMonitor {
         val fps1Percent: Int = 0,
         val fps01Percent: Int = 0,
         val processName: String = "",
-        val isMonitoring: Boolean = false
+        val isMonitoring: Boolean = false,
+        // True when fps is a rough GPU-utilisation estimate (fallback path), not a
+        // real per-frame measurement from PresentMon/ETW. The UI marks it with "~".
+        val isEstimate: Boolean = false
     )
     
     private val _frameStats = MutableStateFlow(FrameStats())
@@ -225,7 +228,8 @@ class FpsMonitor {
                         fps = fps,
                         frametime = frametime,
                         processName = processName,
-                        isMonitoring = true
+                        isMonitoring = true,
+                        isEstimate = true
                     )
                 } catch (e: Exception) {
                     println("[FPS] Fallback error: ${e.message}")

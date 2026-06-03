@@ -52,7 +52,7 @@ fun DashboardPage(
                 DashStatCard("NET PING", if (stats.latency > 0) "${stats.latency}" else "--", "ms",
                     when { stats.latency <= 0 -> VextiqColors.TextMuted; stats.latency < 50 -> VextiqColors.Primary; stats.latency < 100 -> VextiqColors.Warning; else -> VextiqColors.Error },
                     Modifier.weight(1f))
-                DashStatCard("FPS", if (stats.fps > 0) "${stats.fps}" else "--", "FPS",
+                DashStatCard("FPS", if (stats.fps > 0) "${if (stats.fpsIsEstimate) "~" else ""}${stats.fps}" else "--", "FPS",
                     when { stats.fps <= 0 -> VextiqColors.TextMuted; stats.fps >= 60 -> VextiqColors.Accent; stats.fps >= 30 -> VextiqColors.Warning; else -> VextiqColors.Error },
                     Modifier.weight(1f))
             }
