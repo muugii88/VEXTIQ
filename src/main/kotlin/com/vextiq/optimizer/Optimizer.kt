@@ -16,7 +16,6 @@ class Optimizer {
     private val networkOptimizer = NetworkOptimizer()
     private val cacheCleaner = CacheCleaner()
     private val ramCleaner = RamCleaner()
-    private val gameProfileOptimizer = GameProfileOptimizer()
     private val gameSpecificOptimizer = GameSpecificOptimizer()
     private val advancedBooster = AdvancedBooster()
     private val backupManager = BackupManager()
