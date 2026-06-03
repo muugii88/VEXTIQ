@@ -1,5 +1,6 @@
 package com.vextiq.optimizer
 
+import oshi.SystemInfo
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -181,7 +182,7 @@ class WindowsOptimizer {
             .redirectErrorStream(true)
             .start()
         
-        val output = process.inputStream.bufferedReader().readText()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
         val exitCode = process.waitFor()
         
         if (exitCode != 0) {
@@ -248,8 +249,11 @@ class WindowsOptimizer {
     fun optimizePagefile(onLog: (String) -> Unit): OptResult {
         onLog("[>>] Optimizing Pagefile for gaming...")
         return try {
-            // Get total RAM
-            val totalRam = Runtime.getRuntime().maxMemory() / (1024 * 1024 * 1024)
+            // Total *physical* RAM, not JVM heap. Runtime.maxMemory() only reports
+            // the heap ceiling (a fraction of system RAM), which made every machine
+            // look like it had ~2-8GB and recommended a too-small pagefile.
+            val totalRamBytes = SystemInfo().hardware.memory.total
+            val totalRam = totalRamBytes / (1024L * 1024L * 1024L)
             val pagefileSize = if (totalRam >= 32) 16384 else if (totalRam >= 16) 8192 else 4096
             
             onLog("[i] Recommended pagefile: ${pagefileSize}MB")

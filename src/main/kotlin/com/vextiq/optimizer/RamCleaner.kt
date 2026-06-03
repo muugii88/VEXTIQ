@@ -172,7 +172,7 @@ class RamCleaner {
                 "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024"
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             output.toDoubleOrNull()?.toLong() ?: 0
@@ -186,7 +186,7 @@ class RamCleaner {
             "powershell", "-NoProfile", "-NonInteractive", "-Command", script
         )).redirectErrorStream(true).start()
         
-        val output = process.inputStream.bufferedReader().readText()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
         process.waitFor()
         
         return output

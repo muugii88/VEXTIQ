@@ -31,6 +31,12 @@ dependencies {
     implementation(compose.material3)
     implementation("com.github.oshi:oshi-core:6.4.8")
     implementation("org.slf4j:slf4j-simple:2.0.9")
+
+    testImplementation(kotlin("test"))
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 compose.desktop {

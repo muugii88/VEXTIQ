@@ -544,7 +544,7 @@ class GamePaths {
         return try {
             val process = ProcessBuilder(listOf("reg", "query", key, "/s"))
                 .redirectErrorStream(true).start()
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             output
         } catch (e: Exception) {

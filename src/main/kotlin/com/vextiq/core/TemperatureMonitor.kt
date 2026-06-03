@@ -48,7 +48,7 @@ class TemperatureMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             output.toIntOrNull()?.coerceIn(0, 120) ?: 0
@@ -77,7 +77,7 @@ class TemperatureMonitor {
                 "nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             val exitCode = process.waitFor()
             
             if (exitCode == 0) {
@@ -106,7 +106,7 @@ class TemperatureMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             output.toIntOrNull()?.coerceIn(0, 120) ?: 0

@@ -215,8 +215,8 @@ class GameSpecificOptimizer {
                 // Shader cache cleanup
                 val shaderCache = File("$userHome\\AppData\\Local\\Star Citizen")
                 if (shaderCache.exists()) {
-                    shaderCache.deleteRecursively()
-                    onLog("[OK] Shader cache cleared")
+                    if (shaderCache.deleteRecursively()) onLog("[OK] Shader cache cleared")
+                    else onLog("[!] Shader cache partly in use — close the game first")
                 }
                 checkPagefile(onLog)
             } catch (e: Exception) {
@@ -267,14 +267,21 @@ class GameSpecificOptimizer {
         val result = vextiqBrain.optimize("cyberpunk_2077", "performance", playstyle) { msg -> onLog(msg) }
         
         val cp77Path = gamePaths.getPath("cyberpunk_2077")
-        if (cp77Path != null) {
-            val configPath = File(cp77Path, "engine\\config\\platform\\pc")
-            configPath.mkdirs()
-            File(configPath, "user.ini").writeText(result.configString)
-            onLog("[OK] user.ini updated with ${playstyle.uppercase()} brain")
-            checkReBAR(onLog)
+        if (cp77Path != null && File(cp77Path).exists()) {
+            try {
+                val configPath = File(cp77Path, "engine\\config\\platform\\pc")
+                if (!configPath.exists() && !configPath.mkdirs()) {
+                    onLog("[!] Could not create config dir: ${configPath.absolutePath}")
+                    return
+                }
+                File(configPath, "user.ini").writeText(result.configString)
+                onLog("[OK] user.ini updated with ${playstyle.uppercase()} brain")
+                checkReBAR(onLog)
+            } catch (e: Exception) {
+                onLog("[!] Cyberpunk config write failed: ${e.message}")
+            }
         } else {
-            onLog("[i] Cyberpunk 2077 path not set. Skipping .ini creation.")
+            onLog("[i] Cyberpunk 2077 path not set or missing. Skipping .ini creation.")
         }
     }
     
@@ -284,9 +291,43 @@ class GameSpecificOptimizer {
     private fun optimizeValorant(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing Valorant...")
         val result = vextiqBrain.optimize("valorant", "performance", playstyle) { msg -> onLog(msg) }
-        
-        onLog("[OK] Valorant performance result: ${result.estimatedFps} FPS")
         setMouseRawInput(onLog)
+
+        // Valorant keeps graphics quality on Riot's cloud; only display/perf flags
+        // are local. Patch native resolution + exclusive fullscreen (lowest input
+        // latency) in the per-user GameUserSettings.ini under the hashed folder.
+        val hw = com.vextiq.core.HardwareManager.getHardware()
+        val iniFile = File(localAppData, "VALORANT\\Saved\\Config").listFiles()
+            ?.firstOrNull { it.isDirectory }
+            ?.let { File(it, "Windows\\GameUserSettings.ini") }
+            ?.takeIf { it.exists() }
+
+        if (iniFile == null) {
+            onLog("[i] Valorant config not found — launch the game once, then re-run")
+            onLog("[OK] Recommended: Exclusive Fullscreen, native ${hw.resWidth}x${hw.resHeight}, Multithreaded Rendering ON")
+            return
+        }
+
+        try {
+            val backup = File(iniFile.parentFile, ConfigBackup.backupNameFor("GameUserSettings.ini"))
+            if (!backup.exists()) iniFile.copyTo(backup)
+            val patched = patchIniKeys(
+                iniFile.readText(),
+                mapOf(
+                    "ResolutionSizeX" to hw.resWidth.toString(),
+                    "ResolutionSizeY" to hw.resHeight.toString(),
+                    "LastUserConfirmedResolutionSizeX" to hw.resWidth.toString(),
+                    "LastUserConfirmedResolutionSizeY" to hw.resHeight.toString(),
+                    "PreferredFullscreenMode" to "0",
+                    "LastConfirmedFullscreenMode" to "0"
+                )
+            )
+            iniFile.writeText(patched)
+            onLog("[OK] Valorant set to exclusive fullscreen @ ${hw.resWidth}x${hw.resHeight}")
+            onLog("[OK] Est. FPS: ${result.estimatedFps} (Valorant runs near-uncapped on most HW)")
+        } catch (e: Exception) {
+            onLog("[!] Could not patch Valorant config: ${e.message}")
+        }
     }
     
     /**
@@ -322,12 +363,49 @@ class GameSpecificOptimizer {
      */
     private fun optimizeWarzone(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing Call of Duty Warzone...")
-        vextiqBrain.optimize("warzone", "performance", playstyle) { msg -> onLog(msg) }
-        
-        onLog("[OK] Applied Brain optimization for ${playstyle.uppercase()}")
-        onLog("[i] Recommended In-Game Settings:")
-        onLog("[i] - DLSS/FSR: ${if(playstyle == "competitive") "Performance" else "Quality"}")
-        onLog("[i] - Texture Streaming: OFF")
+        val result = vextiqBrain.optimize("warzone", "performance", playstyle) { msg -> onLog(msg) }
+        val hw = com.vextiq.core.HardwareManager.getHardware()
+        val tier = result.gpuTier
+
+        // COD profile files are renamed every title (options.3.cod22.txt, s.1.0cod24,
+        // ...) and Ricochet treats them as protected — auto-overwriting risks a
+        // corrupt profile or a ban flag. So we write a hardware-tuned settings guide
+        // next to the real profile instead of editing the build-specific files.
+        val upscaler = when (hw.gpuVendor) {
+            "NVIDIA" -> "NVIDIA DLSS"; "AMD" -> "AMD FSR"; else -> "Intel XeSS"
+        }
+        val guide = buildString {
+            appendLine("VEXTIQ PRO - Warzone recommended settings")
+            appendLine("Detected: ${hw.gpuName} (${hw.gpuVramGB}GB) | ${hw.cpuName} | ${hw.resWidth}x${hw.resHeight}@${hw.refreshRate}Hz | Tier ${tier.uppercase()}")
+            appendLine()
+            appendLine("[Display]")
+            appendLine("Display Mode: Fullscreen Exclusive")
+            appendLine("Refresh Rate: ${hw.refreshRate} Hz")
+            appendLine("Max FPS (Gameplay): ${hw.refreshRate.coerceAtLeast(60)}")
+            appendLine("V-Sync: Off")
+            appendLine()
+            appendLine("[Quality - tuned to your GPU]")
+            appendLine("Texture Resolution: ${when (tier) { "ultra" -> "High"; "high" -> "Normal"; else -> "Low" }}")
+            appendLine("VRAM Scale Target: ${(hw.gpuVramGB * 0.9).toInt()} GB")
+            appendLine("Shadow Quality: ${if (tier in listOf("ultra", "high")) "Normal" else "Low"}")
+            appendLine("Particle / Shader Quality: Low")
+            appendLine("Screen Space Reflections: Off")
+            appendLine("Ambient Occlusion: ${if (tier == "ultra") "GTAO" else "Off"}")
+            appendLine("Volumetric / Deferred Physics: Low")
+            appendLine("Upscaling: $upscaler (${if (tier in listOf("ultra", "high")) "Quality" else "Balanced"})")
+            appendLine("NVIDIA Reflex Low Latency: ${if (hw.gpuVendor == "NVIDIA") "Enabled + Boost" else "N/A"}")
+            appendLine()
+            appendLine("Est. FPS: ~${result.estimatedFps}")
+        }
+
+        val playersDir = File("$documentsPath\\Call of Duty\\players")
+        if (playersDir.exists()) {
+            writeGameConfig(playersDir, "vextiq_warzone_settings.txt", guide, onLog)
+            onLog("[i] COD profiles are build-specific & anti-cheat-protected — apply these in-game (guide saved beside your profile)")
+        } else {
+            onLog("[i] Launch Warzone once so its config folder exists. Recommended settings:")
+            guide.lineSequence().forEach { onLog("  $it") }
+        }
     }
     
     /**
@@ -336,9 +414,61 @@ class GameSpecificOptimizer {
     private fun optimizeFortnite(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing Fortnite...")
         val result = vextiqBrain.optimize("fortnite", "performance", playstyle) { msg -> onLog(msg) }
-        
-        onLog("[OK] Fortnite Brain Result: ${result.estimatedFps} FPS estimated")
-        onLog("[i] - Rendering Mode: Performance (DX12)")
+        val hw = com.vextiq.core.HardwareManager.getHardware()
+        val tier = result.gpuTier
+        val quality = playstyle == "quality"
+
+        // UE scalability ints: 0=Low 1=Medium 2=High 3=Epic. Fortnite competitive
+        // wisdom: kill shadows/effects/PP for FPS + clean sightlines, keep View
+        // Distance high to spot enemies, scale textures with VRAM. Quality playstyle
+        // relaxes this on capable GPUs.
+        val texture = (when (tier) { "ultra" -> 3; "high" -> 2; "medium" -> 1; else -> 0 })
+            .coerceAtMost(if (hw.gpuVramGB >= 8) 3 else if (hw.gpuVramGB >= 6) 2 else 1)
+        val viewDist = if (quality && tier == "ultra") 3 else 2
+        val shadow = if (quality) (when (tier) { "ultra" -> 2; "high" -> 1; else -> 0 }) else 0
+        val aa = when (tier) { "ultra", "high" -> 2; "medium" -> 1; else -> 0 }
+        val post = if (quality) (when (tier) { "ultra" -> 2; "high" -> 1; else -> 0 }) else 0
+        val effects = if (quality) (when (tier) { "ultra" -> 2; "high" -> 1; else -> 0 }) else 0
+        val foliage = if (quality && tier in listOf("ultra", "high")) 1 else 0
+        val shading = if (tier in listOf("ultra", "high")) 1 else 0
+        val fpsLimit = hw.refreshRate.coerceAtLeast(60)
+
+        val ini = buildString {
+            appendLine("; VEXTIQ PRO - Fortnite GameUserSettings.ini")
+            appendLine("; GPU Tier ${tier.uppercase()} | ${hw.gpuName} (${hw.gpuVramGB}GB) | ${hw.resWidth}x${hw.resHeight}@${hw.refreshRate}Hz")
+            appendLine("[/Script/FortniteGame.FortGameUserSettings]")
+            appendLine("FrameRateLimit=$fpsLimit.000000")
+            appendLine("bUseVSync=False")
+            appendLine("bUseDynamicResolution=False")
+            appendLine("ResolutionSizeX=${hw.resWidth}")
+            appendLine("ResolutionSizeY=${hw.resHeight}")
+            appendLine("LastUserConfirmedResolutionSizeX=${hw.resWidth}")
+            appendLine("LastUserConfirmedResolutionSizeY=${hw.resHeight}")
+            appendLine("FullscreenMode=0")
+            appendLine("PreferredFullscreenMode=0")
+            appendLine("LastConfirmedFullscreenMode=0")
+            appendLine()
+            appendLine("[ScalabilityGroups]")
+            appendLine("sg.ResolutionQuality=100.000000")
+            appendLine("sg.ViewDistanceQuality=$viewDist")
+            appendLine("sg.AntiAliasingQuality=$aa")
+            appendLine("sg.ShadowQuality=$shadow")
+            appendLine("sg.GlobalIlluminationQuality=0")
+            appendLine("sg.ReflectionQuality=0")
+            appendLine("sg.PostProcessQuality=$post")
+            appendLine("sg.TextureQuality=$texture")
+            appendLine("sg.EffectsQuality=$effects")
+            appendLine("sg.FoliageQuality=$foliage")
+            appendLine("sg.ShadingQuality=$shading")
+        }
+
+        val cfgDir = File(localAppData, "FortniteGame\\Saved\\Config\\WindowsClient")
+        if (writeGameConfig(cfgDir, "GameUserSettings.ini", ini, onLog)) {
+            onLog("[i] Tip: set GameUserSettings.ini read-only to keep it across patches")
+            onLog("[OK] Est. FPS: ~${result.estimatedFps}")
+        } else {
+            onLog("[i] Launch Fortnite once so the config folder exists, then re-run")
+        }
     }
     
     /**
@@ -366,8 +496,85 @@ class GameSpecificOptimizer {
      */
     private fun optimizeGTAV(playstyle: String, onLog: (String) -> Unit) {
         onLog("[>>] Optimizing GTA V...")
-        vextiqBrain.optimize("gta_v", "performance", playstyle) { msg -> onLog(msg) }
-        onLog("[OK] Applied ${playstyle.uppercase()} settings")
+        val result = vextiqBrain.optimize("gta_v", "performance", playstyle) { msg -> onLog(msg) }
+        val hw = com.vextiq.core.HardwareManager.getHardware()
+        val tier = result.gpuTier
+        val quality = playstyle == "quality" || playstyle == "exploration"
+
+        // GTA V quality scale: 0=Normal .. 2=Very High; shadows go to 3 (Ultra).
+        // MSAA is brutally expensive, so it stays off unless Ultra+quality.
+        val q = when (tier) { "ultra" -> if (quality) 2 else 1; "high" -> 1; "medium" -> 1; else -> 0 }
+        val shadow = when (tier) { "ultra" -> if (quality) 3 else 1; "high" -> 1; else -> 0 }
+        val msaa = if (quality && tier == "ultra") 2 else 0
+        val aniso = when (tier) { "ultra", "high" -> 16; "medium" -> 8; else -> 4 }
+        val tessellation = if (quality && tier in listOf("ultra", "high")) 2 else 0
+        val grass = when (tier) { "ultra" -> if (quality) 3 else 1; "high" -> 2; "medium" -> 1; else -> 0 }
+        val texture = q.coerceAtLeast(if (hw.gpuVramGB >= 6) 2 else 1)
+
+        val xml = buildString {
+            appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+            appendLine("<!-- VEXTIQ PRO - GTA V settings.xml | Tier ${tier.uppercase()} | ${hw.gpuName} ${hw.gpuVramGB}GB -->")
+            appendLine("<Settings>")
+            appendLine("  <graphics>")
+            appendLine("    <Tessellation value=\"$tessellation\" />")
+            appendLine("    <LodScale value=\"${if (quality) "1.000000" else "0.700000"}\" />")
+            appendLine("    <PedLodBias value=\"0.000000\" />")
+            appendLine("    <VehicleLodBias value=\"0.000000\" />")
+            appendLine("    <ShadowQuality value=\"$shadow\" />")
+            appendLine("    <ReflectionQuality value=\"$q\" />")
+            appendLine("    <ReflectionMSAA value=\"0\" />")
+            appendLine("    <SSAO value=\"${if (quality) 2 else 1}\" />")
+            appendLine("    <AnisotropicFiltering value=\"$aniso\" />")
+            appendLine("    <MSAA value=\"$msaa\" />")
+            appendLine("    <MSAAFragments value=\"0\" />")
+            appendLine("    <MSAAQuality value=\"0\" />")
+            appendLine("    <SamplingMode value=\"0\" />")
+            appendLine("    <TextureQuality value=\"$texture\" />")
+            appendLine("    <ParticleQuality value=\"$q\" />")
+            appendLine("    <WaterQuality value=\"$q\" />")
+            appendLine("    <GrassQuality value=\"$grass\" />")
+            appendLine("    <ShaderQuality value=\"$q\" />")
+            appendLine("    <Shadow_SoftShadows value=\"${if (quality) 3 else 1}\" />")
+            appendLine("    <UltraShadows_Enabled value=\"${quality && tier == "ultra"}\" />")
+            appendLine("    <Shadow_ParticleShadows value=\"$quality\" />")
+            appendLine("    <Shadow_Distance value=\"1.000000\" />")
+            appendLine("    <Shadow_LongShadows value=\"false\" />")
+            appendLine("    <Reflection_MipBlur value=\"true\" />")
+            appendLine("    <FXAA_Enabled value=\"true\" />")
+            appendLine("    <TXAA_Enabled value=\"false\" />")
+            appendLine("    <Lighting_FogVolumes value=\"true\" />")
+            appendLine("    <Shader_SSA value=\"true\" />")
+            appendLine("    <DX_Version value=\"2\" />")
+            appendLine("    <CityDensity value=\"${if (quality) "1.000000" else "0.700000"}\" />")
+            appendLine("    <PedVarietyMultiplier value=\"1.000000\" />")
+            appendLine("    <VehicleVarietyMultiplier value=\"1.000000\" />")
+            appendLine("    <PostFX value=\"${q.coerceAtMost(2)}\" />")
+            appendLine("    <DoF value=\"$quality\" />")
+            appendLine("    <HdStreamingInFlight value=\"false\" />")
+            appendLine("    <MaxLodScale value=\"0.000000\" />")
+            appendLine("    <MotionBlurStrength value=\"0.000000\" />")
+            appendLine("  </graphics>")
+            appendLine("  <video>")
+            appendLine("    <AdapterIndex value=\"0\" />")
+            appendLine("    <OutputIndex value=\"0\" />")
+            appendLine("    <ScreenWidth value=\"${hw.resWidth}\" />")
+            appendLine("    <ScreenHeight value=\"${hw.resHeight}\" />")
+            appendLine("    <RefreshRate value=\"${hw.refreshRate}\" />")
+            appendLine("    <Windowed value=\"0\" />")
+            appendLine("    <VSync value=\"0\" />")
+            appendLine("    <Stereo value=\"0\" />")
+            appendLine("    <Pauseonfocusloss value=\"0\" />")
+            appendLine("    <AspectRatio value=\"0\" />")
+            appendLine("  </video>")
+            appendLine("</Settings>")
+        }
+
+        val dir = File("$documentsPath\\Rockstar Games\\GTA V")
+        if (writeGameConfig(dir, "settings.xml", xml, onLog)) {
+            onLog("[OK] GTA V settings.xml applied (Tier ${tier.uppercase()})")
+        } else {
+            onLog("[i] Launch GTA V once to create the settings folder, then re-run")
+        }
     }
     
     /**
@@ -432,7 +639,7 @@ class GameSpecificOptimizer {
                 "(Get-CimInstance Win32_PageFileSetting).InitialSize"
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             val pagefileMB = output.toIntOrNull() ?: 0
@@ -460,7 +667,7 @@ class GameSpecificOptimizer {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("ReBAR_POSSIBLE")) {
@@ -493,19 +700,110 @@ class GameSpecificOptimizer {
         }
     }
     
+    // ─────────────────────────────────────────────────────────────
+    // Real, hardware-aware game config writers
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Write [content] to [dir]/[fileName], creating the directory if needed and
+     * backing up any existing file to <name>.vextiq.bak the first time (so the
+     * pristine original is always recoverable). Returns true on success.
+     */
+    private fun writeGameConfig(dir: File, fileName: String, content: String, onLog: (String) -> Unit): Boolean {
+        return try {
+            if (!dir.exists() && !dir.mkdirs()) {
+                onLog("[!] Could not create config dir: ${dir.absolutePath}")
+                return false
+            }
+            val file = File(dir, fileName)
+            if (file.exists()) {
+                val backup = File(dir, ConfigBackup.backupNameFor(fileName))
+                if (!backup.exists()) {
+                    file.copyTo(backup)
+                    onLog("[i] Backed up original $fileName -> ${backup.name}")
+                }
+            }
+            file.writeText(content)
+            onLog("[OK] $fileName written: ${file.absolutePath}")
+            true
+        } catch (e: Exception) {
+            onLog("[!] Could not write $fileName: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Replace each `key=value` line for the given keys, preserving everything
+     * else in the file. Keys not already present are appended. Used to patch a
+     * game's existing INI without clobbering settings we don't manage.
+     */
+    internal fun patchIniKeys(content: String, keys: Map<String, String>): String {
+        var out = content
+        for ((k, v) in keys) {
+            val regex = Regex("(?m)^\\s*${Regex.escape(k)}\\s*=.*$")
+            out = if (regex.containsMatchIn(out)) {
+                regex.replace(out) { "$k=$v" }
+            } else {
+                out.trimEnd() + "\n$k=$v\n"
+            }
+        }
+        return out
+    }
+
+    /**
+     * Undo All (game side): restore every game config VEXTIQ overwrote from its
+     * `.vextiq.bak` backup, across all the locations the writers touch. Returns
+     * the number of files restored.
+     */
+    fun restoreGameConfigs(onLog: (String) -> Unit): Int {
+        onLog("[>>] Restoring game configs from VEXTIQ backups...")
+        val dirs = mutableListOf(
+            File(localAppData, "FortniteGame\\Saved\\Config\\WindowsClient"),
+            File("$documentsPath\\Rockstar Games\\GTA V"),
+            File("$documentsPath\\My Games\\Ghost Recon Breakpoint"),
+            File("$documentsPath\\My Games\\Tom Clancy's The Division 2"),
+            File("$documentsPath\\Once Human\\Saved\\Config\\WindowsNoEditor")
+        )
+        File(localAppData, "VALORANT\\Saved\\Config").listFiles()
+            ?.filter { it.isDirectory }
+            ?.forEach { dirs += File(it, "Windows") }
+        listOf("star_citizen", "battlefield_6", "battlefield_2042").forEach { id ->
+            gamePaths.getPath(id)?.let { dirs += File(it) }
+        }
+        gamePaths.getPath("cyberpunk_2077")?.let { dirs += File(it, "engine\\config\\platform\\pc") }
+
+        var total = 0
+        for (dir in dirs.distinct()) {
+            ConfigBackup.restoreAll(dir).forEach { name ->
+                onLog("[OK] Restored $name (${dir.absolutePath})")
+                total++
+            }
+        }
+        if (total == 0) onLog("[i] No VEXTIQ game-config backups found to restore")
+        else onLog("[OK] Restored $total game config file(s)")
+        return total
+    }
+
     /**
      * Set game process to high priority when running
      */
-    fun setGamePriority(processName: String, onLog: (String) -> Unit) {
-        try {
+    fun setGamePriority(processName: String, onLog: (String) -> Unit) {        try {
+            // Escape single quotes so a crafted process name can't break out of the
+            // wmic filter. wmic is also absent on newer Win11 builds — handled below.
+            val safeName = processName.replace("'", "")
             val process = ProcessBuilder(listOf(
-                "wmic", "process", "where", "name='$processName'",
+                "wmic", "process", "where", "name='$safeName'",
                 "call", "setpriority", "128"
             )).redirectErrorStream(true).start()
-            
-            process.waitFor()
-            onLog("[OK] $processName priority: High")
-            
+
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val exit = process.waitFor()
+            // wmic prints "ReturnValue = 0;" on a successful priority change.
+            if (exit == 0 && output.contains("ReturnValue = 0")) {
+                onLog("[OK] $processName priority: High")
+            } else {
+                onLog("[!] Could not set $processName priority (not running or wmic unavailable)")
+            }
         } catch (e: Exception) {
             onLog("[i] Could not set priority")
         }
@@ -527,7 +825,7 @@ class GameSpecificOptimizer {
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script))
                 .redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -584,18 +882,8 @@ class GameSpecificOptimizer {
             """.trimIndent()
         }
         
-        try {
-            val configDir = java.io.File("$documentsPath\\My Games\\Ghost Recon Breakpoint")
-            if (configDir.exists() || configDir.mkdirs()) {
-                val configFile = java.io.File(configDir, "vextiq_settings.txt")
-                configFile.writeText(settings)
-                onLog("[OK] Ghost Recon Breakpoint optimized!")
-                onLog("[>>] Config: ${configFile.absolutePath}")
-            }
-        } catch (e: Exception) {
-            onLog("[!] Error: ${e.message}")
-        }
-        
+        writeGameConfig(File("$documentsPath\\My Games\\Ghost Recon Breakpoint"), "vextiq_settings.txt", settings, onLog)
+
         applyGenericOptimizations("ghost_recon_breakpoint", playstyle, onLog)
     }
     
@@ -641,24 +929,12 @@ class GameSpecificOptimizer {
             """.trimIndent()
         }
         
-        try {
-            val configDir = java.io.File("$documentsPath\\Once Human\\Saved\\Config\\WindowsNoEditor")
-            if (configDir.exists() || configDir.mkdirs()) {
-                val configFile = java.io.File(configDir, "Engine.ini")
-                
-                // Append or create
-                val content = if (configFile.exists()) {
-                    configFile.readText() + "\n\n[/Script/Engine.RendererSettings]\n$settings"
-                } else {
-                    "[/Script/Engine.RendererSettings]\n$settings"
-                }
-                configFile.writeText(content)
-                onLog("[OK] Once Human optimized!")
-            }
-        } catch (e: Exception) {
-            onLog("[!] Error: ${e.message}")
-        }
-        
+        val ohDir = File("$documentsPath\\Once Human\\Saved\\Config\\WindowsNoEditor")
+        val existing = File(ohDir, "Engine.ini").takeIf { it.exists() }?.readText()?.trimEnd()
+        val block = "[/Script/Engine.RendererSettings]\n$settings"
+        val content = if (existing != null) "$existing\n\n$block" else block
+        writeGameConfig(ohDir, "Engine.ini", content, onLog)
+
         applyGenericOptimizations("once_human", playstyle, onLog)
     }
     
@@ -714,18 +990,8 @@ class GameSpecificOptimizer {
             """.trimIndent()
         }
         
-        try {
-            val configDir = java.io.File("$documentsPath\\My Games\\Tom Clancy's The Division 2")
-            if (configDir.exists() || configDir.mkdirs()) {
-                val configFile = java.io.File(configDir, "vextiq_settings.cfg")
-                configFile.writeText(settings)
-                onLog("[OK] Division 2 optimized!")
-                onLog("[>>] Config: ${configFile.absolutePath}")
-            }
-        } catch (e: Exception) {
-            onLog("[!] Error: ${e.message}")
-        }
-        
+        writeGameConfig(File("$documentsPath\\My Games\\Tom Clancy's The Division 2"), "vextiq_settings.cfg", settings, onLog)
+
         applyGenericOptimizations("division_2", playstyle, onLog)
     }
     

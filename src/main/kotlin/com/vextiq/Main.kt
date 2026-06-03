@@ -18,7 +18,9 @@ import androidx.compose.ui.window.*
 import com.vextiq.core.*
 import com.vextiq.optimizer.*
 import com.vextiq.ui.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class Page { DASHBOARD, GAMEBOOST, TOOLS, VPN, TROUBLESHOOT, SETTINGS }
 
@@ -41,16 +43,22 @@ private fun ensureUserDesktopShortcutAsync() {
             ).redirectErrorStream(true).start()
             val finished = getDesktopProc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
             if (!finished) { getDesktopProc.destroyForcibly(); return@Thread }
-            val desktopPath = getDesktopProc.inputStream.bufferedReader().readText().trim()
+            val desktopPath = getDesktopProc.inputStream.bufferedReader().use { it.readText() }.trim()
             val desktop = java.io.File(desktopPath).takeIf { it.exists() && it.isDirectory } ?: return@Thread
 
             val link = java.io.File(desktop, "VEXTIQ PRO.lnk")
             if (link.exists()) return@Thread
+            // Escape paths for single-quoted PowerShell strings (' -> '') so a
+            // username/path containing a quote can't break out and inject commands.
+            fun ps(value: String) = value.replace("'", "''")
+            val linkPath = ps(link.absolutePath)
+            val targetPath = ps(appPath)
+            val workingDir = ps(java.io.File(appPath).parent ?: "")
             val createProc = ProcessBuilder(
                 "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                "\$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${link.absolutePath}'); " +
-                    "\$s.TargetPath='$appPath'; \$s.WorkingDirectory='${java.io.File(appPath).parent}'; " +
-                    "\$s.IconLocation='$appPath'; \$s.Description='VEXTIQ PRO'; \$s.Save()"
+                "\$s=(New-Object -ComObject WScript.Shell).CreateShortcut('$linkPath'); " +
+                    "\$s.TargetPath='$targetPath'; \$s.WorkingDirectory='$workingDir'; " +
+                    "\$s.IconLocation='$targetPath'; \$s.Description='VEXTIQ PRO'; \$s.Save()"
             ).start()
             createProc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
         } catch (_: Throwable) { /* best-effort */ }
@@ -142,6 +150,13 @@ fun App(
     val settings = remember { SettingsManager() }
     val stats by monitor.stats.collectAsState()
     val netStats by monitor.networkStats.collectAsState()
+
+    // Admin status drives the dashboard warning banner. Detected once off the UI
+    // thread (it spawns a PowerShell check) so startup isn't blocked.
+    var isAdmin by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        isAdmin = withContext(Dispatchers.IO) { AdminCheck.isAdmin }
+    }
 
     var currentPage by remember { mutableStateOf(Page.DASHBOARD) }
     var selectedGame by remember {
@@ -318,9 +333,10 @@ fun App(
                                     else -> logs = logs + ("[i] Action: $action" to "")
                                 }
                             }
-                        }
+                        },
+                        isAdmin = isAdmin
                     )
-                    
+
                     Page.GAMEBOOST -> GameBoostPage(
                         games = Games.list,
                         selectedGame = selectedGame,
@@ -409,6 +425,7 @@ fun App(
                                     "SC_Memory" -> WindowsOptimizer().optimizePagefile(logMsg)
                                     "Backup" -> BackupManager().createBackup(logMsg)
                                     "Restore" -> BackupManager().restoreBackup(logMsg)
+                                    "UndoAll" -> optimizer.undoAll(logMsg)
                                     "Repair" -> WindowsOptimizer().repairWindows(logMsg)
                                     else -> toolsLogs = toolsLogs + ("[i] Action: $action" to "")
                                 }

@@ -3,14 +3,12 @@ package com.vextiq.core
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 
 /**
  * VEXTIQ FPS Monitor
  * 
- * Method 1: PresentMon (most accurate) - bundled in resources or auto-downloaded
+ * Method 1: PresentMon (most accurate) - bundled in resources, extracted on first use
  * Method 2: GPU Performance Counters (fallback)
  */
 class FpsMonitor {
@@ -21,14 +19,17 @@ class FpsMonitor {
         val fps1Percent: Int = 0,
         val fps01Percent: Int = 0,
         val processName: String = "",
-        val isMonitoring: Boolean = false
+        val isMonitoring: Boolean = false,
+        // True when fps is a rough GPU-utilisation estimate (fallback path), not a
+        // real per-frame measurement from PresentMon/ETW. The UI marks it with "~".
+        val isEstimate: Boolean = false
     )
     
     private val _frameStats = MutableStateFlow(FrameStats())
     val frameStats: StateFlow<FrameStats> = _frameStats
     
     private var monitorJob: Job? = null
-    private var presentMonProcess: Process? = null
+    @Volatile private var presentMonProcess: Process? = null
     
     // VEXTIQ directory for tools
     private val vextiqDir = File(System.getProperty("user.home"), ".vextiq").also { it.mkdirs() }
@@ -100,16 +101,21 @@ class FpsMonitor {
         
         if (presentMonPath != null) {
             println("[FPS] Found PresentMon: $presentMonPath")
-            // Try PresentMon, but start fallback too in case it fails
+            startPresentMon(scope, presentMonPath)
+            // PresentMon legitimately emits nothing until a game actually presents
+            // frames, so fps==0 while idle is NORMAL — not a failure. The old check
+            // (`fps == 0`) tripped 2s after launch whenever no game was running yet,
+            // permanently cancelling the accurate PresentMon job and locking the UI
+            // onto the rough GPU-utilisation estimate. Only fall back if the
+            // PresentMon process itself failed to start or died early (no admin,
+            // blocked by AV, bad binary).
             scope.launch(Dispatchers.IO) {
-                delay(2000) // Wait 2 seconds
-                // If no FPS data after 2 seconds, PresentMon probably failed
-                if (_frameStats.value.fps == 0) {
-                    println("[FPS] PresentMon not producing data, using fallback...")
+                delay(2000)
+                if (presentMonProcess?.isAlive != true) {
+                    println("[FPS] PresentMon process not alive, using fallback...")
                     startFallbackMonitor(scope)
                 }
             }
-            startPresentMon(scope, presentMonPath)
         } else {
             println("[FPS] PresentMon not found, using fallback monitor")
             startFallbackMonitor(scope)
@@ -222,7 +228,8 @@ class FpsMonitor {
                         fps = fps,
                         frametime = frametime,
                         processName = processName,
-                        isMonitoring = true
+                        isMonitoring = true,
+                        isEstimate = true
                     )
                 } catch (e: Exception) {
                     println("[FPS] Fallback error: ${e.message}")
@@ -230,34 +237,6 @@ class FpsMonitor {
                 delay(500)
             }
         }
-    }
-    
-    /**
-     * Try to read FPS from RTSS shared memory
-     */
-    private fun tryRtssMemory(): Int {
-        return try {
-            val process = ProcessBuilder(listOf(
-                "powershell", "-NoProfile", "-Command",
-                """
-                try {
-                    ${'$'}rtss = Get-Process "RTSS" -ErrorAction SilentlyContinue
-                    if (${'$'}rtss) {
-                        # RTSS is running, try to get FPS from OSD
-                        ${'$'}counter = (Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples |
-                            Where-Object { ${'$'}_.CookedValue -gt 5 } | Measure-Object -Property CookedValue -Sum
-                        if (${'$'}counter.Sum -gt 10) {
-                            [math]::Round(60 * (${'$'}counter.Sum / 50))
-                        } else { 0 }
-                    } else { 0 }
-                } catch { 0 }
-                """.trimIndent()
-            )).redirectErrorStream(true).start()
-            
-            val output = process.inputStream.bufferedReader().readText().trim()
-            process.waitFor()
-            output.toIntOrNull() ?: 0
-        } catch (e: Exception) { 0 }
     }
     
     /**
@@ -279,7 +258,7 @@ class FpsMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             output.toIntOrNull() ?: 0
         } catch (e: Exception) { 0 }
@@ -296,7 +275,7 @@ class FpsMonitor {
                 "powershell", "-NoProfile", "-Command",
                 "\$p = Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 -and \$_.ProcessName -notmatch '$ignoreRegex' } | Sort-Object CPU -Descending | Select-Object -First 1; if (\$p) { \$p.ProcessName } else { (Get-Process | Where-Object { \$_.MainWindowHandle -ne 0 } | Select-Object -First 1).ProcessName }"
             )).redirectErrorStream(true).start()
-            val processName = nameProcess.inputStream.bufferedReader().readText().trim().ifEmpty { "Unknown" }
+            val processName = nameProcess.inputStream.bufferedReader().use { it.readText() }.trim().ifEmpty { "Unknown" }
             nameProcess.waitFor()
             
             // Get GPU 3D usage
@@ -309,48 +288,13 @@ class FpsMonitor {
                 } catch { 0 }"""
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             val fps = output.toIntOrNull() ?: 0
             
             Pair(fps, processName)
         } catch (e: Exception) {
             Pair(0, "Unknown")
-        }
-    }
-    
-    /**
-     * Download PresentMon automatically
-     */
-    private fun downloadPresentMon(): Boolean {
-        return try {
-            val url = "https://github.com/GameTechDev/PresentMon/releases/download/v1.10.0/PresentMon-1.10.0-x64.exe"
-            println("[FPS] Downloading PresentMon from GitHub...")
-
-            val process = ProcessBuilder(listOf(
-                "powershell", "-NoProfile", "-Command",
-                "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; " +
-                "Invoke-WebRequest -Uri '$url' -OutFile '${presentMonExe.absolutePath}' -UseBasicParsing"
-            )).redirectErrorStream(true).start()
-
-            val output = process.inputStream.bufferedReader().readText()
-            val exit = process.waitFor()
-            val ok = exit == 0 && presentMonExe.exists() && presentMonExe.length() > 100_000
-
-            if (ok) {
-                println("[FPS] PresentMon downloaded successfully (${presentMonExe.length() / 1024}KB)")
-            } else {
-                System.err.println(
-                    "[FPS] PresentMon download FAILED (exit=$exit). " +
-                    "Likely cause: no internet, firewall, or GitHub blocked. " +
-                    "FPS will use GPU-counter fallback (less accurate)."
-                )
-                if (output.isNotBlank()) System.err.println("[FPS]   PowerShell output: ${output.take(300)}")
-            }
-            ok
-        } catch (e: Exception) {
-            System.err.println("[FPS] PresentMon download threw: ${e.message}. Using fallback.")
-            false
         }
     }
     

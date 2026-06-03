@@ -102,7 +102,7 @@ fun FpsOverlay(
                 
                 // FPS
                 if (settings.overlayShowFps) {
-                    StatRow("FPS", if (stats.fps > 0) "${stats.fps}" else "--", getFpsColor(stats.fps))
+                    StatRow("FPS", if (stats.fps > 0) "${if (stats.fpsIsEstimate) "~" else ""}${stats.fps}" else "--", getFpsColor(stats.fps))
                 }
                 
                 // Frametime

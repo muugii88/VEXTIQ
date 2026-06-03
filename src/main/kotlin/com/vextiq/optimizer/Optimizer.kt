@@ -16,7 +16,6 @@ class Optimizer {
     private val networkOptimizer = NetworkOptimizer()
     private val cacheCleaner = CacheCleaner()
     private val ramCleaner = RamCleaner()
-    private val gameProfileOptimizer = GameProfileOptimizer()
     private val gameSpecificOptimizer = GameSpecificOptimizer()
     private val advancedBooster = AdvancedBooster()
     private val backupManager = BackupManager()
@@ -231,6 +230,27 @@ class Optimizer {
         backupManager.restoreLatest(onLog)
     }
     
+    /**
+     * Undo All — best-effort revert of everything VEXTIQ changed:
+     *  1. Re-import the latest registry backup (Game DVR / FSO / power / DirectX).
+     *  2. System repair (services, power plan, network stack, pagefile).
+     *  3. Restore overwritten game configs from their .vextiq.bak backups.
+     * Each step is isolated so one failure can't abort the rest.
+     */
+    suspend fun undoAll(onLog: (String) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        onLog("[>>] VEXTIQ Undo All — reverting changes...")
+        onLog("")
+        runCatching { backupManager.restoreLatest(onLog) }
+            .onFailure { onLog("[!] Registry restore failed: ${it.message}") }
+        runCatching { advancedBooster.repairSystem(onLog) }
+            .onFailure { onLog("[!] System repair failed: ${it.message}") }
+        runCatching { gameSpecificOptimizer.restoreGameConfigs(onLog) }
+            .onFailure { onLog("[!] Game-config restore failed: ${it.message}") }
+        onLog("")
+        onLog("[OK] Undo All complete — restart recommended for full effect")
+        true
+    }
+
     /**
      * Detect GPU info
      */

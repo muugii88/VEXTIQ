@@ -28,7 +28,7 @@ object AdminCheck {
                         ".IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"
                 )
             ).redirectErrorStream(true).start()
-            val output = proc.inputStream.bufferedReader().readText().trim()
+            val output = proc.inputStream.bufferedReader().use { it.readText() }.trim()
             proc.waitFor()
             output.equals("True", ignoreCase = true)
         } catch (_: Exception) {

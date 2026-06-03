@@ -33,8 +33,22 @@ class AdvancedBooster {
 
     private fun runTimerPowerShell(onLog: (String) -> Unit): Boolean {
         return try {
-            val script = "Add-Type '@\nusing System;using System.Runtime.InteropServices;public class NtDll{[DllImport(\"ntdll.dll\")]public static extern int NtSetTimerResolution(int d,bool s,out int c);}\n@'; \$c=0; [NtDll]::NtSetTimerResolution(5000,\$true,[ref]\$c)"
-            ProcessBuilder("powershell", "-Command", script).start()
+            // A PowerShell here-string opens with @' and closes with '@ at the start
+            // of a line. The previous version had these delimiters reversed ('@ ...
+            // @'), so Add-Type never parsed and the fallback silently did nothing.
+            val script = """
+                Add-Type @'
+                using System;
+                using System.Runtime.InteropServices;
+                public class NtDll { [DllImport("ntdll.dll")] public static extern int NtSetTimerResolution(int d, bool s, out int c); }
+                '@
+                ${'$'}c = 0
+                [NtDll]::NtSetTimerResolution(5000, ${'$'}true, [ref]${'$'}c)
+            """.trimIndent()
+            val process = ProcessBuilder("powershell", "-NoProfile", "-Command", script)
+                .redirectErrorStream(true).start()
+            // Must wait — a fire-and-forget process can be reaped before it runs.
+            process.waitFor()
             onLog("[i] Fallback applied (Effect may be temporary)")
             true
         } catch (e: Exception) { false }
@@ -64,15 +78,21 @@ class AdvancedBooster {
                 "powercfg /setacvalueindex scheme_current sub_processor CPMAXCORES 100",
                 "powercfg /setactive scheme_current"
             )
-            
+
+            var allOk = true
             for (cmd in commands) {
                 val process = ProcessBuilder(listOf("cmd", "/c", cmd))
                     .redirectErrorStream(true).start()
-                process.waitFor()
+                if (process.waitFor() != 0) allOk = false
             }
-            
-            onLog("[OK] Core parking disabled - all cores active")
-            true
+
+            if (allOk) {
+                onLog("[OK] Core parking disabled - all cores active")
+                true
+            } else {
+                onLog("[!] Core parking: powercfg reported an error (run as admin)")
+                false
+            }
         } catch (e: Exception) {
             onLog("[!] Error: ${e.message}")
             false
@@ -104,11 +124,17 @@ class AdvancedBooster {
             val process = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command", script
             )).redirectErrorStream(true).start()
-            
+
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
-            
-            onLog("[OK] GPU scheduler optimized")
-            true
+
+            if (output.contains("OK")) {
+                onLog("[OK] GPU scheduler optimized")
+                true
+            } else {
+                onLog("[!] GPU scheduler optimization incomplete")
+                false
+            }
         } catch (e: Exception) {
             onLog("[!] Error: ${e.message}")
             false
@@ -128,7 +154,7 @@ class AdvancedBooster {
                 "Get-MMAgent | Select-Object -ExpandProperty MemoryCompression"
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.equals("True", ignoreCase = true)) {
@@ -177,7 +203,7 @@ class AdvancedBooster {
                 "powershell", "-NoProfile", "-Command", script
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
             
             if (output.contains("OK:")) {
@@ -221,12 +247,18 @@ class AdvancedBooster {
             val process = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command", script
             )).redirectErrorStream(true).start()
-            
+
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
-            
-            onLog("[OK] Mouse acceleration disabled, raw input enabled")
-            onLog("[i] USB polling rate: check mouse software (1000Hz recommended)")
-            true
+
+            if (output.contains("OK")) {
+                onLog("[OK] Mouse acceleration disabled, raw input enabled")
+                onLog("[i] USB polling rate: check mouse software (1000Hz recommended)")
+                true
+            } else {
+                onLog("[!] Mouse optimization failed")
+                false
+            }
         } catch (e: Exception) {
             onLog("[!] Error: ${e.message}")
             false
@@ -259,11 +291,17 @@ class AdvancedBooster {
             val process = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command", script
             )).redirectErrorStream(true).start()
-            
+
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
-            
-            onLog("[OK] Visual effects optimized for performance")
-            true
+
+            if (output.contains("OK")) {
+                onLog("[OK] Visual effects optimized for performance")
+                true
+            } else {
+                onLog("[!] Visual effects optimization failed")
+                false
+            }
         } catch (e: Exception) {
             onLog("[!] Error: ${e.message}")
             false
@@ -344,11 +382,17 @@ class AdvancedBooster {
             val process = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command", script
             )).redirectErrorStream(true).start()
-            
+
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
-            
-            onLog("[OK] Fullscreen optimizations disabled globally")
-            true
+
+            if (output.contains("OK")) {
+                onLog("[OK] Fullscreen optimizations disabled globally")
+                true
+            } else {
+                onLog("[!] Fullscreen optimization failed")
+                false
+            }
         } catch (e: Exception) {
             onLog("[!] Error: ${e.message}")
             false
@@ -378,11 +422,17 @@ class AdvancedBooster {
             val process = ProcessBuilder(listOf(
                 "powershell", "-NoProfile", "-Command", script
             )).redirectErrorStream(true).start()
-            
+
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor()
-            
-            onLog("[OK] Background apps disabled")
-            true
+
+            if (output.contains("OK")) {
+                onLog("[OK] Background apps disabled")
+                true
+            } else {
+                onLog("[!] Background apps optimization failed")
+                false
+            }
         } catch (e: Exception) {
             onLog("[!] Error: ${e.message}")
             false
@@ -414,12 +464,29 @@ class AdvancedBooster {
                 } else { Write-Output "NOTFOUND" }
             """.trimIndent()
             
-            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
+            val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script))
+                .redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
-            
-            onLog("[OK] System prioritized for gaming (MMCSS High)")
-            true
-        } catch (e: Exception) { false }
+
+            when {
+                output.contains("OK") -> {
+                    onLog("[OK] System prioritized for gaming (MMCSS High)")
+                    true
+                }
+                output.contains("NOTFOUND") -> {
+                    onLog("[!] MMCSS Games task not found — run Network optimization first")
+                    false
+                }
+                else -> {
+                    onLog("[!] MMCSS optimization failed (run as admin)")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            onLog("[!] MMCSS error: ${e.message}")
+            false
+        }
     }
     
     /**
@@ -429,10 +496,18 @@ class AdvancedBooster {
         onLog("[>>] Setting global game priority...")
         return try {
             // Set Game DVR and standard games to high priority
-            val script = "Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name 'ForegroundLockTimeout' -Value 0 -Type DWord"
-            ProcessBuilder("powershell", "-Command", script).start().waitFor()
-            onLog("[OK] Game priority set")
-            true
+            val script = "Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name 'ForegroundLockTimeout' -Value 0 -Type DWord; if (${'$'}?) { Write-Output 'OK' }"
+            val process = ProcessBuilder("powershell", "-NoProfile", "-Command", script)
+                .redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor()
+            if (output.contains("OK")) {
+                onLog("[OK] Game priority set")
+                true
+            } else {
+                onLog("[!] Game priority failed")
+                false
+            }
         } catch (e: Exception) { false }
     }
 
@@ -489,7 +564,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output == "OK") {
@@ -532,7 +607,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -565,21 +640,29 @@ class AdvancedBooster {
             )
             
             var cleanedCount = 0
+            var failedCount = 0
             for (path in paths) {
                 val dir = java.io.File(path)
                 if (dir.exists()) {
                     onLog("  Cleaning: $path")
                     try {
-                        dir.listFiles()?.forEach { it.deleteRecursively() }
-                        cleanedCount++
+                        // deleteRecursively() returns false if any child couldn't be
+                        // removed (e.g. locked by a running game), so count only the
+                        // locations we actually emptied — not just the ones that existed.
+                        val allDeleted = dir.listFiles()?.all { it.deleteRecursively() } ?: true
+                        if (allDeleted) cleanedCount++ else failedCount++
                     } catch (_: Exception) {
-                        // Some files might be in use
+                        failedCount++
                     }
                 }
             }
-            
-            onLog("[OK] Global Shader Cache cleaned ($cleanedCount locations)")
-            true
+
+            if (failedCount == 0) {
+                onLog("[OK] Global Shader Cache cleaned ($cleanedCount locations)")
+            } else {
+                onLog("[!] Shader cache: $cleanedCount cleaned, $failedCount had files in use")
+            }
+            cleanedCount > 0 || failedCount == 0
         } catch (e: Exception) {
             onLog("[!] Error: ${e.message}")
             false
@@ -608,7 +691,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -656,7 +739,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -702,7 +785,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -729,7 +812,7 @@ class AdvancedBooster {
             val fallbackScript = "Get-Process | ForEach-Object { try { [Runtime.InteropServices.Marshal]::SetProcessWorkingSetSize(${'$'}_.Handle, -1, -1) } catch {} }; Write-Output 'OK'"
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", fallbackScript)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {
@@ -866,7 +949,7 @@ class AdvancedBooster {
             """.trimIndent()
             
             val process = ProcessBuilder(listOf("powershell", "-NoProfile", "-Command", script)).start()
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             
             if (output.contains("OK")) {

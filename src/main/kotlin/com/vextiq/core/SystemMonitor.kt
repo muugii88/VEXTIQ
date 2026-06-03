@@ -18,6 +18,9 @@ data class SystemStats(
     val ramTotalGB: Double = 0.0,
     val fps: Int = 0,
     val frametime: Double = 0.0,
+    // True when fps is a rough estimate (GPU-utilisation fallback) rather than a
+    // measured per-frame value from ETW/PresentMon.
+    val fpsIsEstimate: Boolean = false,
     val latency: Int = 0,
     val activeGame: String = "",
     val isGameRunning: Boolean = false
@@ -61,6 +64,7 @@ class SystemMonitor {
     private var lastGpuTemp: Int = 0
     private var lastLatency: Int = 0
     private var lastFps: Int = 0
+    private var lastFpsEstimate: Boolean = false
     private var lastFrametime: Double = 0.0
     private var lastActiveGame: String = ""
     private var isGameRunning: Boolean = false
@@ -71,12 +75,12 @@ class SystemMonitor {
     private val fpsMonitor = FpsMonitor()
     @Volatile private var etwActive = false
     
-    // NOTE: brain/AdaptiveOptimizer.kt exists but is intentionally NOT wired —
-    // it mutates an in-memory config map and notifies listeners that nobody
-    // subscribes to, so its "Increased shadow resolution" logs had no real
-    // effect on any game. Bringing it back requires writing the produced
-    // config out to each game's actual config file (CryEngine .cfg / RTSS / etc.)
-    // before re-enabling the start/stop calls.
+    // NOTE: an in-memory "adaptive optimizer" experiment used to live in
+    // brain/AdaptiveOptimizer.kt but was never wired in — it mutated a config
+    // map and notified listeners nobody subscribed to, so it had no real effect
+    // on any game. It has been removed. Reviving the idea requires writing the
+    // produced config out to each game's actual config file (CryEngine .cfg /
+    // RTSS / etc.) rather than just mutating memory.
 
     // Adaptive Tuner - throttles background apps on stutter spikes
     private val settings = SettingsManager()
@@ -138,6 +142,7 @@ class SystemMonitor {
                 etwFpsMonitor.stats.collect { s ->
                     if (!s.isRunning) return@collect
                     lastFps = s.fps
+                    lastFpsEstimate = false // ETW is a real per-frame measurement
                     lastFrametime = s.frametime
                     lastActiveGame = s.processName
                     isGameRunning = s.fps > 0 && s.processName.isNotEmpty()
@@ -154,6 +159,7 @@ class SystemMonitor {
             fpsMonitor.frameStats.collect { stats ->
                 if (etwActive) return@collect // ETW is authoritative
                 lastFps = stats.fps
+                lastFpsEstimate = stats.isEstimate
                 lastFrametime = stats.frametime
                 lastActiveGame = stats.processName
                 isGameRunning = stats.isMonitoring && stats.fps > 0
@@ -235,6 +241,7 @@ class SystemMonitor {
             ramTotalGB = ramTotalGB,
             fps = lastFps,
             frametime = lastFrametime,
+            fpsIsEstimate = lastFpsEstimate,
             latency = lastLatency,
             activeGame = lastActiveGame,
             isGameRunning = isGameRunning
@@ -295,11 +302,10 @@ class SystemMonitor {
                     val process = ProcessBuilder(listOf(
                         "ping", "-n", "1", "-w", "500", server
                     )).redirectErrorStream(true).start()
-                    val output = process.inputStream.bufferedReader().readText()
+                    val output = process.inputStream.bufferedReader().use { it.readText() }
                     process.waitFor()
                     
-                    val match = "(\\d+)\\s*(ms|мс|мил|мсек)".toRegex(RegexOption.IGNORE_CASE).find(output)
-                    val latency = match?.groupValues?.get(1)?.toIntOrNull()
+                    val latency = PingParse.parseLatencyMs(output)
                     if (latency != null && latency > 0) return latency
                 } catch (e: Exception) { /* skip */ }
             }
@@ -391,7 +397,7 @@ class SystemMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             output.toIntOrNull() ?: 0
         } catch (e: Exception) { 0 }
@@ -438,7 +444,7 @@ class SystemMonitor {
                 """.trimIndent()
             )).redirectErrorStream(true).start()
             
-            val output = process.inputStream.bufferedReader().readText().trim()
+            val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             output.toIntOrNull() ?: 0
         } catch (e: Exception) { 0 }
@@ -451,7 +457,7 @@ class SystemMonitor {
                     val process = ProcessBuilder(listOf(
                         "nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"
                     )).redirectErrorStream(true).start()
-                    val output = process.inputStream.bufferedReader().readText().trim()
+                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
                     if (process.waitFor() == 0) output.toIntOrNull() ?: 0 else 0
                 }
                 "AMD" -> {
@@ -466,7 +472,7 @@ class SystemMonitor {
                         } catch { 0 }
                         """.trimIndent()
                     )).redirectErrorStream(true).start()
-                    val output = process.inputStream.bufferedReader().readText().trim()
+                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
                     process.waitFor()
                     output.toIntOrNull()?.coerceIn(0, 120) ?: 0
                 }
