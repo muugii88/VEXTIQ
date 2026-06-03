@@ -759,7 +759,10 @@ class GameSpecificOptimizer {
         onLog("[>>] Restoring game configs from VEXTIQ backups...")
         val dirs = mutableListOf(
             File(localAppData, "FortniteGame\\Saved\\Config\\WindowsClient"),
-            File("$documentsPath\\Rockstar Games\\GTA V")
+            File("$documentsPath\\Rockstar Games\\GTA V"),
+            File("$documentsPath\\My Games\\Ghost Recon Breakpoint"),
+            File("$documentsPath\\My Games\\Tom Clancy's The Division 2"),
+            File("$documentsPath\\Once Human\\Saved\\Config\\WindowsNoEditor")
         )
         File(localAppData, "VALORANT\\Saved\\Config").listFiles()
             ?.filter { it.isDirectory }
@@ -879,18 +882,8 @@ class GameSpecificOptimizer {
             """.trimIndent()
         }
         
-        try {
-            val configDir = java.io.File("$documentsPath\\My Games\\Ghost Recon Breakpoint")
-            if (configDir.exists() || configDir.mkdirs()) {
-                val configFile = java.io.File(configDir, "vextiq_settings.txt")
-                configFile.writeText(settings)
-                onLog("[OK] Ghost Recon Breakpoint optimized!")
-                onLog("[>>] Config: ${configFile.absolutePath}")
-            }
-        } catch (e: Exception) {
-            onLog("[!] Error: ${e.message}")
-        }
-        
+        writeGameConfig(File("$documentsPath\\My Games\\Ghost Recon Breakpoint"), "vextiq_settings.txt", settings, onLog)
+
         applyGenericOptimizations("ghost_recon_breakpoint", playstyle, onLog)
     }
     
@@ -936,24 +929,12 @@ class GameSpecificOptimizer {
             """.trimIndent()
         }
         
-        try {
-            val configDir = java.io.File("$documentsPath\\Once Human\\Saved\\Config\\WindowsNoEditor")
-            if (configDir.exists() || configDir.mkdirs()) {
-                val configFile = java.io.File(configDir, "Engine.ini")
-                
-                // Append or create
-                val content = if (configFile.exists()) {
-                    configFile.readText() + "\n\n[/Script/Engine.RendererSettings]\n$settings"
-                } else {
-                    "[/Script/Engine.RendererSettings]\n$settings"
-                }
-                configFile.writeText(content)
-                onLog("[OK] Once Human optimized!")
-            }
-        } catch (e: Exception) {
-            onLog("[!] Error: ${e.message}")
-        }
-        
+        val ohDir = File("$documentsPath\\Once Human\\Saved\\Config\\WindowsNoEditor")
+        val existing = File(ohDir, "Engine.ini").takeIf { it.exists() }?.readText()?.trimEnd()
+        val block = "[/Script/Engine.RendererSettings]\n$settings"
+        val content = if (existing != null) "$existing\n\n$block" else block
+        writeGameConfig(ohDir, "Engine.ini", content, onLog)
+
         applyGenericOptimizations("once_human", playstyle, onLog)
     }
     
@@ -1009,18 +990,8 @@ class GameSpecificOptimizer {
             """.trimIndent()
         }
         
-        try {
-            val configDir = java.io.File("$documentsPath\\My Games\\Tom Clancy's The Division 2")
-            if (configDir.exists() || configDir.mkdirs()) {
-                val configFile = java.io.File(configDir, "vextiq_settings.cfg")
-                configFile.writeText(settings)
-                onLog("[OK] Division 2 optimized!")
-                onLog("[>>] Config: ${configFile.absolutePath}")
-            }
-        } catch (e: Exception) {
-            onLog("[!] Error: ${e.message}")
-        }
-        
+        writeGameConfig(File("$documentsPath\\My Games\\Tom Clancy's The Division 2"), "vextiq_settings.cfg", settings, onLog)
+
         applyGenericOptimizations("division_2", playstyle, onLog)
     }
     
