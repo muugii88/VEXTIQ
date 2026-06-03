@@ -26,7 +26,7 @@ class FpsMonitor {
     val frameStats: StateFlow<FrameStats> = _frameStats
     
     private var monitorJob: Job? = null
-    private var presentMonProcess: Process? = null
+    @Volatile private var presentMonProcess: Process? = null
     
     // VEXTIQ directory for tools
     private val vextiqDir = File(System.getProperty("user.home"), ".vextiq").also { it.mkdirs() }
@@ -98,16 +98,21 @@ class FpsMonitor {
         
         if (presentMonPath != null) {
             println("[FPS] Found PresentMon: $presentMonPath")
-            // Try PresentMon, but start fallback too in case it fails
+            startPresentMon(scope, presentMonPath)
+            // PresentMon legitimately emits nothing until a game actually presents
+            // frames, so fps==0 while idle is NORMAL — not a failure. The old check
+            // (`fps == 0`) tripped 2s after launch whenever no game was running yet,
+            // permanently cancelling the accurate PresentMon job and locking the UI
+            // onto the rough GPU-utilisation estimate. Only fall back if the
+            // PresentMon process itself failed to start or died early (no admin,
+            // blocked by AV, bad binary).
             scope.launch(Dispatchers.IO) {
-                delay(2000) // Wait 2 seconds
-                // If no FPS data after 2 seconds, PresentMon probably failed
-                if (_frameStats.value.fps == 0) {
-                    println("[FPS] PresentMon not producing data, using fallback...")
+                delay(2000)
+                if (presentMonProcess?.isAlive != true) {
+                    println("[FPS] PresentMon process not alive, using fallback...")
                     startFallbackMonitor(scope)
                 }
             }
-            startPresentMon(scope, presentMonPath)
         } else {
             println("[FPS] PresentMon not found, using fallback monitor")
             startFallbackMonitor(scope)

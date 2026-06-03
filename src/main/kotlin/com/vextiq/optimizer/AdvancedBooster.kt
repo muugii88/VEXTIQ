@@ -33,8 +33,22 @@ class AdvancedBooster {
 
     private fun runTimerPowerShell(onLog: (String) -> Unit): Boolean {
         return try {
-            val script = "Add-Type '@\nusing System;using System.Runtime.InteropServices;public class NtDll{[DllImport(\"ntdll.dll\")]public static extern int NtSetTimerResolution(int d,bool s,out int c);}\n@'; \$c=0; [NtDll]::NtSetTimerResolution(5000,\$true,[ref]\$c)"
-            ProcessBuilder("powershell", "-Command", script).start()
+            // A PowerShell here-string opens with @' and closes with '@ at the start
+            // of a line. The previous version had these delimiters reversed ('@ ...
+            // @'), so Add-Type never parsed and the fallback silently did nothing.
+            val script = """
+                Add-Type @'
+                using System;
+                using System.Runtime.InteropServices;
+                public class NtDll { [DllImport("ntdll.dll")] public static extern int NtSetTimerResolution(int d, bool s, out int c); }
+                '@
+                ${'$'}c = 0
+                [NtDll]::NtSetTimerResolution(5000, ${'$'}true, [ref]${'$'}c)
+            """.trimIndent()
+            val process = ProcessBuilder("powershell", "-NoProfile", "-Command", script)
+                .redirectErrorStream(true).start()
+            // Must wait — a fire-and-forget process can be reaped before it runs.
+            process.waitFor()
             onLog("[i] Fallback applied (Effect may be temporary)")
             true
         } catch (e: Exception) { false }
