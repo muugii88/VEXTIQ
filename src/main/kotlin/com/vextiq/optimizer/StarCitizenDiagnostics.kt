@@ -97,12 +97,11 @@ object StarCitizenDiagnostics {
 
         // Partial patch files (.part, .tmp, .download) under environments
         val partialFiles = mutableListOf<File>()
-        var partialBytes = 0L
         for (env in environments) {
             val envDir = File(installDir, env)
             collectPartialFiles(envDir, partialFiles)
         }
-        partialBytes = partialFiles.sumOf { it.length() }
+        val partialBytes = partialFiles.sumOf { it.length() }
         if (partialFiles.isNotEmpty()) {
             checks.add(Check(
                 "partial", "Interrupted download", Status.PROBLEM,
@@ -151,7 +150,7 @@ object StarCitizenDiagnostics {
         }
 
         // Error log signature for 5007
-        val errorSignature = detect5007Signature(installDir, launcherCacheDir)
+        val errorSignature = detect5007Signature(launcherCacheDir)
         if (errorSignature != null) {
             checks.add(Check("error5007", "Recent error signature", Status.PROBLEM,
                 detail = errorSignature, actionable = true))
@@ -267,7 +266,7 @@ object StarCitizenDiagnostics {
         }
     }
 
-    private fun detect5007Signature(installDir: File, launcherCacheDir: File): String? {
+    private fun detect5007Signature(launcherCacheDir: File): String? {
         if (!launcherCacheDir.isDirectory) return null
         val logs = File(launcherCacheDir, "logs")
         if (!logs.isDirectory) return null

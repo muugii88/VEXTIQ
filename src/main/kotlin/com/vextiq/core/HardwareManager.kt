@@ -81,7 +81,7 @@ object HardwareManager {
         var cpuFreq = 3600
         var gpuName = "Unknown"
         var gpuVendor = "Unknown"
-        var gpuVramMB = 8192
+        var gpuVramMB: Int
         var ramGB = 16
         var ramSpeed = 3200
         var resWidth = 1920

@@ -207,22 +207,18 @@ class FpsMonitor {
             
             while (isActive) {
                 try {
-                    var fps = 0
-                    var frametime = 0.0
-                    var processName = "Game"
-                    
                     // Method 1: GPU performance counters (most reliable fallback)
                     val result = getGpuFpsEstimate()
-                    fps = result.first
-                    processName = result.second
-                    
+                    var fps = result.first
+                    val processName = result.second
+
                     // Method 2: DirectX present stats
                     if (fps <= 0) {
                         fps = getDirectXFps()
                     }
-                    
+
                     // Calculate frametime from FPS
-                    frametime = if (fps > 0) 1000.0 / fps else 0.0
+                    val frametime = if (fps > 0) 1000.0 / fps else 0.0
                     
                     _frameStats.value = FrameStats(
                         fps = fps,

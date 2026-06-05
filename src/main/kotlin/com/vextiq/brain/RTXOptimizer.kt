@@ -41,7 +41,7 @@ class RTXOptimizer {
         return when (gpuVendor.uppercase()) {
             "NVIDIA" -> detectNvidiaCapabilities(name, gpuVramGB)
             "AMD" -> detectAmdCapabilities(name, gpuVramGB)
-            "INTEL" -> detectIntelCapabilities(name, gpuVramGB)
+            "INTEL" -> detectIntelCapabilities(name)
             else -> GpuCapabilities(vendor = gpuVendor, supportsFSR = true) // FSR works on anything
         }
     }
@@ -50,9 +50,8 @@ class RTXOptimizer {
      * Get optimal RT/DLSS recommendation for a game
      */
     fun getRecommendation(
-        capabilities: GpuCapabilities, 
-        gpuTier: String, 
-        targetFps: Int = 60,
+        capabilities: GpuCapabilities,
+        gpuTier: String,
         isCompetitive: Boolean = false
     ): RTXRecommendation {
         
@@ -234,7 +233,7 @@ class RTXOptimizer {
         )
     }
 
-    private fun detectIntelCapabilities(name: String, vramGB: Int): GpuCapabilities {
+    private fun detectIntelCapabilities(name: String): GpuCapabilities {
         val isArc = name.contains("ARC") || name.contains("A7") || name.contains("A5") || name.contains("A3")
 
         return GpuCapabilities(
