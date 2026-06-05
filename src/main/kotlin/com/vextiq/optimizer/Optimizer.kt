@@ -159,7 +159,7 @@ class Optimizer {
             onLog("[i] Success: $success/$total optimizations")
             onLog("[i] Restart $gameName for best results")
 
-            if (fpsBefore != null && monitor != null) {
+            if (fpsBefore != null) {
                 delay(3000)
                 val fpsAfter = monitor.stats.value.fps
                 if (fpsAfter > 0) {
@@ -308,7 +308,7 @@ class Optimizer {
         onLog("[OK] ULTIMATE BOOST COMPLETE!")
         onLog("═══════════════════════════════════════")
 
-        if (fpsBefore != null && monitor != null) {
+        if (fpsBefore != null) {
             delay(3000)
             val fpsAfter = monitor.stats.value.fps
             if (fpsAfter > 0) {

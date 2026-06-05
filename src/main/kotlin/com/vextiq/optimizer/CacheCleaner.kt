@@ -250,11 +250,8 @@ class CacheCleaner {
     fun openStarCitizenAppData() {
         try {
             val scPath = File("$localAppData\\Star Citizen")
-            if (scPath.exists()) {
-                Runtime.getRuntime().exec("explorer.exe \"${scPath.absolutePath}\"")
-            } else {
-                Runtime.getRuntime().exec("explorer.exe \"$localAppData\"")
-            }
+            val target = if (scPath.exists()) scPath.absolutePath else localAppData
+            ProcessBuilder("explorer.exe", target).start()
         } catch (e: Exception) {
             // Ignore
         }
